@@ -1,0 +1,147 @@
+{
+  "leaderboard": [
+    {
+      "accuracy": 0.9492,
+      "artifact_size_kb": 704.8,
+      "f1": 0.949,
+      "feature_set": "tfidf",
+      "infer_latency_ms_per_1k": 1.4,
+      "model": "calibrated_linear_svc",
+      "roc_auc": 0.9889,
+      "train_time_s": 1.03
+    },
+    {
+      "accuracy": 0.9419,
+      "artifact_size_kb": 2071.1,
+      "f1": 0.9416,
+      "feature_set": "tfidf",
+      "infer_latency_ms_per_1k": 7.7,
+      "model": "lightgbm",
+      "roc_auc": 0.9872,
+      "train_time_s": 36.54
+    },
+    {
+      "accuracy": 0.9425,
+      "artifact_size_kb": 235.1,
+      "f1": 0.9424,
+      "feature_set": "tfidf",
+      "infer_latency_ms_per_1k": 0.5,
+      "model": "logreg",
+      "roc_auc": 0.9854,
+      "train_time_s": 0.56
+    },
+    {
+      "accuracy": 0.9218,
+      "artifact_size_kb": 812.7,
+      "f1": 0.9212,
+      "feature_set": "tfidf",
+      "infer_latency_ms_per_1k": 2.5,
+      "model": "xgboost",
+      "roc_auc": 0.98,
+      "train_time_s": 72.53
+    },
+    {
+      "accuracy": 0.8979,
+      "artifact_size_kb": 146632.2,
+      "f1": 0.8985,
+      "feature_set": "tfidf",
+      "infer_latency_ms_per_1k": 16.3,
+      "model": "random_forest",
+      "roc_auc": 0.9606,
+      "train_time_s": 9.71
+    },
+    {
+      "accuracy": 0.8373,
+      "artifact_size_kb": 150836.7,
+      "f1": 0.8384,
+      "feature_set": "embeddings",
+      "infer_latency_ms_per_1k": 7.0,
+      "model": "stacking",
+      "roc_auc": 0.9158,
+      "train_time_s": 43.27
+    },
+    {
+      "accuracy": 0.8346,
+      "artifact_size_kb": 150832.7,
+      "f1": 0.8346,
+      "feature_set": "embeddings",
+      "infer_latency_ms_per_1k": 6.7,
+      "model": "voting_soft",
+      "roc_auc": 0.913,
+      "train_time_s": 13.98
+    },
+    {
+      "accuracy": 0.8215,
+      "artifact_size_kb": 1354.3,
+      "f1": 0.8243,
+      "feature_set": "embeddings",
+      "infer_latency_ms_per_1k": 0.5,
+      "model": "xgboost",
+      "roc_auc": 0.908,
+      "train_time_s": 4.52
+    },
+    {
+      "accuracy": 0.8253,
+      "artifact_size_kb": 1072.8,
+      "f1": 0.828,
+      "feature_set": "embeddings",
+      "infer_latency_ms_per_1k": 2.2,
+      "model": "lightgbm",
+      "roc_auc": 0.9077,
+      "train_time_s": 4.73
+    },
+    {
+      "accuracy": 0.8154,
+      "artifact_size_kb": 354.6,
+      "f1": 0.819,
+      "feature_set": "embeddings",
+      "infer_latency_ms_per_1k": 0.6,
+      "model": "catboost",
+      "roc_auc": 0.8971,
+      "train_time_s": 3.09
+    },
+    {
+      "accuracy": 0.8187,
+      "artifact_size_kb": 10.6,
+      "f1": 0.8191,
+      "feature_set": "embeddings",
+      "infer_latency_ms_per_1k": 0.9,
+      "model": "calibrated_linear_svc",
+      "roc_auc": 0.8927,
+      "train_time_s": 3.89
+    },
+    {
+      "accuracy": 0.8067,
+      "artifact_size_kb": 2.2,
+      "f1": 0.8075,
+      "feature_set": "embeddings",
+      "infer_latency_ms_per_1k": 0.2,
+      "model": "logreg",
+      "roc_auc": 0.8842,
+      "train_time_s": 0.06
+    },
+    {
+      "accuracy": 0.7543,
+      "artifact_size_kb": 149474.8,
+      "f1": 0.7435,
+      "feature_set": "embeddings",
+      "infer_latency_ms_per_1k": 6.2,
+      "model": "random_forest",
+      "roc_auc": 0.8332,
+      "train_time_s": 9.89
+    }
+  ],
+  "n_test": 8106,
+  "n_train": 32420,
+  "task": "fake_review",
+  "winner": {
+    "accuracy": 0.9492,
+    "artifact_size_kb": 704.8,
+    "f1": 0.949,
+    "feature_set": "tfidf",
+    "infer_latency_ms_per_1k": 1.4,
+    "model": "calibrated_linear_svc",
+    "roc_auc": 0.9889,
+    "train_time_s": 1.03
+  }
+}

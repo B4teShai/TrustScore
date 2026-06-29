@@ -1,0 +1,127 @@
+{
+  "artifacts": {
+    "feature_config": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/fake_review_feature_config.json",
+    "metadata": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/model_metadata.json",
+    "model": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/fake_review_rf.joblib",
+    "vectorizer": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/fake_review_vectorizer.joblib"
+  },
+  "dataset": {
+    "name": "fake_reviews.csv",
+    "row_count": 40526,
+    "source": "/Users/altanshagai/Desktop/side/TrustScore/ml/data/fake_reviews.csv",
+    "url": "https://huggingface.co/datasets/theArijitDas/Fake-Reviews-Dataset"
+  },
+  "limitations": [
+    "Labels distinguish original from generated reviews, not every real-world fraud pattern.",
+    "Backend averages review-level fake probabilities at product level."
+  ],
+  "metrics": {
+    "test": {
+      "accuracy": 0.9515,
+      "confusion_matrix": [
+        [
+          3866,
+          181
+        ],
+        [
+          212,
+          3847
+        ]
+      ],
+      "f1": 0.9514,
+      "precision": 0.9551,
+      "recall": 0.9478,
+      "roc_auc": 0.9893
+    },
+    "validation_model_selection": {
+      "complement_nb": {
+        "accuracy": 0.8799,
+        "confusion_matrix": [
+          [
+            2779,
+            458
+          ],
+          [
+            321,
+            2926
+          ]
+        ],
+        "f1": 0.8825,
+        "precision": 0.8647,
+        "recall": 0.9011,
+        "roc_auc": 0.9584
+      },
+      "linear_svc": {
+        "accuracy": 0.9491,
+        "confusion_matrix": [
+          [
+            3073,
+            164
+          ],
+          [
+            166,
+            3081
+          ]
+        ],
+        "f1": 0.9492,
+        "precision": 0.9495,
+        "recall": 0.9489,
+        "roc_auc": 0.9895
+      },
+      "logreg": {
+        "accuracy": 0.9357,
+        "confusion_matrix": [
+          [
+            3036,
+            201
+          ],
+          [
+            216,
+            3031
+          ]
+        ],
+        "f1": 0.9356,
+        "precision": 0.9378,
+        "recall": 0.9335,
+        "roc_auc": 0.985
+      },
+      "random_forest": {
+        "accuracy": 0.8913,
+        "confusion_matrix": [
+          [
+            2886,
+            351
+          ],
+          [
+            354,
+            2893
+          ]
+        ],
+        "f1": 0.8914,
+        "precision": 0.8918,
+        "recall": 0.891,
+        "roc_auc": 0.9578
+      }
+    },
+    "winner": "linear_svc"
+  },
+  "model_name": "fake_review_v2_linear_svc",
+  "model_version": "0.2.0",
+  "params": {
+    "candidates": [
+      "logreg",
+      "linear_svc",
+      "complement_nb",
+      "random_forest"
+    ],
+    "char_ngram": [
+      3,
+      5
+    ],
+    "max_features": 40000,
+    "seed": 42,
+    "test_size": 0.2,
+    "word_ngram": 2
+  },
+  "trained_at": "2026-06-18T06:32:12Z"
+}

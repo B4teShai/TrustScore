@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "AI TrustScore",
+  "version": "1.1.0",
+  "description": "Analyze online shopping product pages and show explainable trust signals.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://localhost:8000/*", "http://127.0.0.1:8000/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob: http: https:; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000;"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "AI TrustScore"
+  }
+}

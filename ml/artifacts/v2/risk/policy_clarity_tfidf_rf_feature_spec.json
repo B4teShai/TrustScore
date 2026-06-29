@@ -1,0 +1,19 @@
+{
+  "artifact": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/risk/policy_clarity_tfidf_rf.joblib",
+  "classes": [
+    "partial"
+  ],
+  "input": "pandas.DataFrame",
+  "label_score_map": {
+    "clear": 90,
+    "partial": 65,
+    "unclear": 35
+  },
+  "model": "return_policy_clarity",
+  "numeric_features": [
+    "has_return",
+    "has_period",
+    "has_warranty"
+  ],
+  "text_feature": "policy_text"
+}

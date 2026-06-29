@@ -1,0 +1,73 @@
+{
+  "name": "trustscore-best",
+  "model_version": "1.0.0",
+  "assembled_at": "2026-06-27T11:13:57.226657+00:00",
+  "description": "Curated best leakage-safe model per TrustScore signal. Version-by-version artifacts remain under ml/artifacts/{v1,v2,v3}.",
+  "weights": {
+    "review_authenticity": 0.3,
+    "seller_reliability": 0.2,
+    "sentiment": 0.2,
+    "return_policy_clarity": 0.15,
+    "price_safety": 0.1,
+    "user_feedback_history": 0.0
+  },
+  "selection": [
+    {
+      "signal": "review_authenticity",
+      "artifact": "best/fake_review/model.joblib",
+      "files": [
+        "model.joblib",
+        "vectorizer.joblib",
+        "metadata.json"
+      ],
+      "model": "calibrated LinearSVC + word/char TF-IDF",
+      "metric": "ROC-AUC 0.989 / acc 0.949 in-domain, 0.91 cross-category",
+      "source_version": "v3",
+      "leakage_safe": true
+    },
+    {
+      "signal": "sentiment",
+      "artifact": "best/sentiment/sentiment_tfidf_logreg.joblib",
+      "files": [
+        "sentiment_tfidf_logreg.joblib",
+        "sentiment_model_metadata.json"
+      ],
+      "model": "TF-IDF + LogReg (neg/neu/pos)",
+      "metric": "acc 0.867 (weak star labels)",
+      "source_version": "v2",
+      "leakage_safe": true
+    },
+    {
+      "signal": "price_safety",
+      "artifact": "best/risk/price_anomaly_iforest.joblib",
+      "files": [
+        "price_anomaly_iforest.joblib",
+        "price_anomaly_medians.json",
+        "price_anomaly_metadata.json"
+      ],
+      "model": "unsupervised IsolationForest anomaly + ratio rule",
+      "metric": "injected-anomaly recall 1.0",
+      "source_version": "v3",
+      "leakage_safe": true
+    },
+    {
+      "signal": "seller_reliability",
+      "artifact": "(rule, no artifact)",
+      "files": [],
+      "model": "transparent rule (rating / review volume / tenure)",
+      "metric": "deterministic",
+      "source_version": "v3",
+      "leakage_safe": true
+    },
+    {
+      "signal": "return_policy_clarity",
+      "artifact": "(rule, no artifact)",
+      "files": [],
+      "model": "transparent rule (return / period / warranty wording)",
+      "metric": "deterministic",
+      "source_version": "v3",
+      "leakage_safe": true
+    }
+  ],
+  "missing_sources": []
+}

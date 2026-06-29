@@ -1,0 +1,150 @@
+{
+  "calibration": {
+    "isotonic": {
+      "brier": 0.0538,
+      "ece": 0.0073
+    },
+    "raw": {
+      "brier": 0.058,
+      "ece": 0.0782
+    }
+  },
+  "fake_review_ablation": [
+    {
+      "accuracy": 0.7588,
+      "feature_set": "linguistic_only",
+      "roc_auc": 0.8485
+    },
+    {
+      "accuracy": 0.9258,
+      "feature_set": "tfidf_only",
+      "roc_auc": 0.9762
+    },
+    {
+      "accuracy": 0.7658,
+      "feature_set": "embeddings_only",
+      "roc_auc": 0.8515
+    },
+    {
+      "accuracy": 0.8242,
+      "feature_set": "embeddings_plus_linguistic",
+      "roc_auc": 0.9085
+    }
+  ],
+  "fake_review_leaderboard": {
+    "top": [
+      {
+        "accuracy": 0.9492,
+        "artifact_size_kb": 704.8,
+        "f1": 0.949,
+        "feature_set": "tfidf",
+        "infer_latency_ms_per_1k": 1.4,
+        "model": "calibrated_linear_svc",
+        "roc_auc": 0.9889,
+        "train_time_s": 1.03
+      },
+      {
+        "accuracy": 0.9419,
+        "artifact_size_kb": 2071.1,
+        "f1": 0.9416,
+        "feature_set": "tfidf",
+        "infer_latency_ms_per_1k": 7.7,
+        "model": "lightgbm",
+        "roc_auc": 0.9872,
+        "train_time_s": 36.54
+      },
+      {
+        "accuracy": 0.9425,
+        "artifact_size_kb": 235.1,
+        "f1": 0.9424,
+        "feature_set": "tfidf",
+        "infer_latency_ms_per_1k": 0.5,
+        "model": "logreg",
+        "roc_auc": 0.9854,
+        "train_time_s": 0.56
+      },
+      {
+        "accuracy": 0.9218,
+        "artifact_size_kb": 812.7,
+        "f1": 0.9212,
+        "feature_set": "tfidf",
+        "infer_latency_ms_per_1k": 2.5,
+        "model": "xgboost",
+        "roc_auc": 0.98,
+        "train_time_s": 72.53
+      },
+      {
+        "accuracy": 0.8979,
+        "artifact_size_kb": 146632.2,
+        "f1": 0.8985,
+        "feature_set": "tfidf",
+        "infer_latency_ms_per_1k": 16.3,
+        "model": "random_forest",
+        "roc_auc": 0.9606,
+        "train_time_s": 9.71
+      }
+    ],
+    "winner": {
+      "accuracy": 0.9492,
+      "artifact_size_kb": 704.8,
+      "f1": 0.949,
+      "feature_set": "tfidf",
+      "infer_latency_ms_per_1k": 1.4,
+      "model": "calibrated_linear_svc",
+      "roc_auc": 0.9889,
+      "train_time_s": 1.03
+    }
+  },
+  "fake_review_ood": {
+    "in_domain": 0.9346,
+    "mean_leave_one_category_out": 0.9102
+  },
+  "leakage": {
+    "price_label": {
+      "numeric_ood": 1.0,
+      "numeric_reconstruction": 1.0,
+      "text_only_ood": 0.5431
+    },
+    "seller_label": {
+      "numeric_ood": 1.0,
+      "numeric_reconstruction": 1.0,
+      "text_only_ood": 0.3953
+    }
+  },
+  "risk_fix": {
+    "approach": {
+      "price_safety": "unsupervised IsolationForest on category-normalised price (no label).",
+      "return_policy_clarity": "transparent deterministic rule (return/period/warranty signals).",
+      "seller_reliability": "transparent deterministic rule (rating / review-count / tenure)."
+    },
+    "price_anomaly_validation": {
+      "injected_anomaly_recall": 1.0,
+      "normal_false_flag_rate": 0.124
+    }
+  },
+  "robustness": {
+    "baseline_accuracy": 0.9323,
+    "perturbed": {
+      "drop_vowels_10pct": {
+        "accuracy": 0.9096,
+        "delta": -0.0226
+      },
+      "lowercase": {
+        "accuracy": 0.9323,
+        "delta": 0.0
+      },
+      "truncate_50_chars": {
+        "accuracy": 0.6949,
+        "delta": -0.2374
+      }
+    }
+  },
+  "sentiment_ood": {
+    "cross_domain": {
+      "imdb": 0.8584,
+      "sst2": 0.7239,
+      "yelp_polarity": 0.8889
+    },
+    "in_domain": 0.8985
+  }
+}

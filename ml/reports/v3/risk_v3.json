@@ -1,0 +1,20 @@
+{
+  "approach": {
+    "price_safety": "unsupervised IsolationForest on category-normalised price (no label).",
+    "return_policy_clarity": "transparent deterministic rule (return/period/warranty signals).",
+    "seller_reliability": "transparent deterministic rule (rating / review-count / tenure)."
+  },
+  "price_anomaly": {
+    "approach": "unsupervised anomaly detection on category-normalised price (no price label used)",
+    "leakage_free": true,
+    "model_name": "v3_price_anomaly_isolation_forest",
+    "model_version": "0.3.0",
+    "n_priced_rows": 60496,
+    "reason": "No supervised price label is used in training; nothing to reconstruct.",
+    "validation": {
+      "injected_anomaly_recall": 1.0,
+      "normal_false_flag_rate": 0.124
+    }
+  },
+  "why_leakage_free": "No model is trained on the v2 weak labels (which were functions of the features). Price uses unsupervised anomaly detection; seller/policy use rules."
+}

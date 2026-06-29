@@ -1,0 +1,29 @@
+{
+  "created_at": "2026-06-18T07:44:51Z",
+  "datasets": {
+    "amazon_polarity": {
+      "hash": "sha256:14a88b5fae0d1065",
+      "path": "/Users/altanshagai/Desktop/side/TrustScore/ml/data/v3/amazon_polarity.csv"
+    },
+    "fake_review_cross": {
+      "hash": "sha256:f6158d8c19202ef2",
+      "path": "/Users/altanshagai/Desktop/side/TrustScore/ml/data/v3/fake_review_cross.csv"
+    },
+    "fake_reviews_v2": {
+      "hash": "sha256:2784fbc7969bc3a7",
+      "path": "/Users/altanshagai/Desktop/side/TrustScore/ml/data/fake_reviews.csv"
+    },
+    "imdb": {
+      "hash": "sha256:44197921f3421ed3",
+      "path": "/Users/altanshagai/Desktop/side/TrustScore/ml/data/v3/imdb.csv"
+    },
+    "sst2": {
+      "hash": "sha256:9cffe6e399928368",
+      "path": "/Users/altanshagai/Desktop/side/TrustScore/ml/data/v3/sst2.csv"
+    },
+    "yelp_polarity": {
+      "hash": "sha256:61ccd8b88430494e",
+      "path": "/Users/altanshagai/Desktop/side/TrustScore/ml/data/v3/yelp_polarity.csv"
+    }
+  }
+}

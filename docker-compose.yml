@@ -1,0 +1,79 @@
+# AI TrustScore full stack: Postgres + API (best model set) + extension + trainer.
+#   cp .env.docker.example .env   # paste ANTHROPIC_API_KEY (optional)
+#   docker compose up --build
+#
+# After it is up:
+#   - API     http://localhost:8000  (health: /health, info: /api/v1/model-info)
+#   - Vite    http://localhost:5173  (extension dev server, hot reload)
+#   - Postgres localhost:5432        (db: trustscore / postgres:postgres)
+# Load the extension in Chrome from apps/extension/dist (run a build for that),
+# or develop against the Vite server at :5173.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: trustscore
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Migrations run in filename order on first init (001 -> 002 -> 003).
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d trustscore"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/trustscore
+      TRUSTSCORE_MODEL_VERSION: best
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5}
+      AI_FEEDBACK_ENABLED: "1"
+      CORS_ALLOW_ORIGINS: "http://localhost:5173,chrome-extension://YOUR_EXTENSION_ID"
+      BROWSER_ID_HASH_SALT: ${BROWSER_ID_HASH_SALT:-local-dev-trustscore-salt}
+    ports:
+      - "8000:8000"
+    volumes:
+      # Best + version-by-version artifacts, read-only.
+      - ./ml/artifacts:/app/ml/artifacts:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      trainer:
+        condition: service_completed_successfully
+
+  extension:
+    build:
+      context: ./apps/extension
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_BASE_URL: "http://localhost:8000"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/extension:/app
+      - /app/node_modules
+    depends_on:
+      - api
+
+  # Assembles ml/artifacts/best/ on startup so the API has the curated best set.
+  # Run real training on demand: docker compose run --rm trainer python -m ml.training.train_all
+  trainer:
+    build:
+      context: .
+      dockerfile: ml/Dockerfile
+    volumes:
+      - ./ml:/app/ml
+    command: ["python", "-m", "ml.training.make_best_artifacts"]
+
+volumes:
+  pgdata:

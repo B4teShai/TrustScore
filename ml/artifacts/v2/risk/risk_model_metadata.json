@@ -1,0 +1,153 @@
+{
+  "artifacts": {
+    "price_safety": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/risk/price_safety_tfidf_rf.joblib",
+    "return_policy_clarity": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/risk/policy_clarity_tfidf_rf.joblib",
+    "seller_reliability": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/risk/seller_reliability_tfidf_rf.joblib"
+  },
+  "dataset": {
+    "name": "amazon_meta_sample.csv",
+    "row_count": 180000,
+    "source": "/Users/altanshagai/Desktop/side/TrustScore/ml/data/amazon_meta_sample.csv",
+    "url": "https://amazon-reviews-2023.github.io/main.html"
+  },
+  "limitations": [
+    "Seller/price/policy labels remain weak labels derived from public metadata and policy-text heuristics; numeric features partly reconstruct the labelling rule, so held-out accuracy is high by construction. The ablation isolates the genuine lift over v1's text-only baseline."
+  ],
+  "metrics": {
+    "price_safety": {
+      "n_rows": 60496,
+      "numeric_plus_text": {
+        "accuracy": 0.9928,
+        "confusion_matrix": [
+          [
+            3073,
+            6,
+            7
+          ],
+          [
+            11,
+            6784,
+            49
+          ],
+          [
+            0,
+            14,
+            2156
+          ]
+        ],
+        "f1_macro": 0.9914,
+        "precision_macro": 0.9894,
+        "recall_macro": 0.9935
+      },
+      "text_only_ablation": {
+        "accuracy": 0.6288,
+        "confusion_matrix": [
+          [
+            2097,
+            806,
+            183
+          ],
+          [
+            1489,
+            4227,
+            1128
+          ],
+          [
+            234,
+            652,
+            1284
+          ]
+        ],
+        "f1_macro": 0.607,
+        "precision_macro": 0.5958,
+        "recall_macro": 0.6296
+      }
+    },
+    "return_policy_clarity": {
+      "n_rows": 1000,
+      "numeric_plus_text": {
+        "accuracy": 1.0,
+        "confusion_matrix": [
+          [
+            200
+          ]
+        ],
+        "f1_macro": 1.0,
+        "precision_macro": 1.0,
+        "recall_macro": 1.0
+      },
+      "text_only_ablation": {
+        "accuracy": 1.0,
+        "confusion_matrix": [
+          [
+            200
+          ]
+        ],
+        "f1_macro": 1.0,
+        "precision_macro": 1.0,
+        "recall_macro": 1.0
+      }
+    },
+    "seller_reliability": {
+      "n_rows": 180000,
+      "numeric_plus_text": {
+        "accuracy": 0.9864,
+        "confusion_matrix": [
+          [
+            16098,
+            47,
+            213
+          ],
+          [
+            48,
+            6950,
+            0
+          ],
+          [
+            169,
+            14,
+            12461
+          ]
+        ],
+        "f1_macro": 0.9873,
+        "precision_macro": 0.9871,
+        "recall_macro": 0.9876
+      },
+      "text_only_ablation": {
+        "accuracy": 0.4978,
+        "confusion_matrix": [
+          [
+            6172,
+            4478,
+            5708
+          ],
+          [
+            1806,
+            4078,
+            1114
+          ],
+          [
+            3367,
+            1606,
+            7671
+          ]
+        ],
+        "f1_macro": 0.4954,
+        "precision_macro": 0.4915,
+        "recall_macro": 0.5222
+      }
+    }
+  },
+  "model_name": "trustscore_v2_numeric_text_risk_models",
+  "model_version": "0.2.0",
+  "params": {
+    "classifier": "RandomForestClassifier",
+    "max_features": 5000,
+    "max_ngram": 2,
+    "min_df": 3,
+    "n_estimators": 200,
+    "seed": 42,
+    "test_size": 0.2
+  },
+  "trained_at": "2026-06-18T06:44:06Z"
+}

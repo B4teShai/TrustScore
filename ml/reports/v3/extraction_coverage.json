@@ -1,0 +1,45 @@
+{
+  "field_coverage_over_detected": {
+    "currency": 1.0,
+    "price": 1.0,
+    "product_title": 1.0,
+    "rating": 0.5,
+    "return_policy": 0.5,
+    "review_count": 1.0,
+    "reviews": 0.5,
+    "seller": 0.5
+  },
+  "n_detected_products": 2,
+  "n_fixtures": 3,
+  "note": "Fixtures are illustrative; point this at a real product-page corpus for production metrics.",
+  "per_fixture": [
+    {
+      "detected": true,
+      "present_fields": [
+        "product_title",
+        "price",
+        "currency",
+        "return_policy",
+        "reviews",
+        "rating",
+        "review_count"
+      ],
+      "url": "https://shop.example.com/product/123"
+    },
+    {
+      "detected": true,
+      "present_fields": [
+        "product_title",
+        "price",
+        "currency",
+        "seller",
+        "review_count"
+      ],
+      "url": "https://shop.example.com/item/777"
+    },
+    {
+      "detected": false,
+      "url": "https://example.com/blog/not-a-product"
+    }
+  ]
+}

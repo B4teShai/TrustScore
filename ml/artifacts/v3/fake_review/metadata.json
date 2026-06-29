@@ -1,0 +1,14 @@
+{
+  "feature_kind": "tfidf",
+  "model_version": "0.3.0",
+  "winner": {
+    "accuracy": 0.9492,
+    "artifact_size_kb": 704.8,
+    "f1": 0.949,
+    "feature_set": "tfidf",
+    "infer_latency_ms_per_1k": 1.4,
+    "model": "calibrated_linear_svc",
+    "roc_auc": 0.9889,
+    "train_time_s": 1.03
+  }
+}

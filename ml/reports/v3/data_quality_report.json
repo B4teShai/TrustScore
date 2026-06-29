@@ -1,0 +1,155 @@
+{
+  "datasets": {
+    "amazon_polarity": {
+      "class_distribution": {
+        "0": 19764,
+        "1": 20236
+      },
+      "empty_text_rate": 0.0,
+      "exact_duplicate_rate": 0.0,
+      "imbalance_ratio": 0.977,
+      "missing_values": {
+        "label": 0,
+        "text": 0
+      },
+      "near_duplicate_rate": 0.0,
+      "rows_sampled": 40000,
+      "text_len_chars": {
+        "mean": 432.1,
+        "p95": 896.0
+      }
+    },
+    "amazon_reviews_v2": {
+      "empty_text_rate": 0.0003,
+      "exact_duplicate_rate": 0.0391,
+      "missing_values": {
+        "asin": 0,
+        "helpful_vote": 0,
+        "images": 0,
+        "parent_asin": 0,
+        "rating": 0,
+        "text": 12,
+        "timestamp": 0,
+        "title": 11,
+        "user_id": 0,
+        "verified_purchase": 0
+      },
+      "near_duplicate_rate": 0.0439,
+      "rows_sampled": 40000,
+      "text_len_chars": {
+        "mean": 266.5,
+        "p95": 924.0
+      }
+    },
+    "fake_review_cross": {
+      "class_distribution": {
+        "0": 20010,
+        "1": 19990
+      },
+      "empty_text_rate": 0.0,
+      "exact_duplicate_rate": 0.001,
+      "imbalance_ratio": 0.999,
+      "missing_values": {
+        "category": 0,
+        "label": 0,
+        "text": 0
+      },
+      "near_duplicate_rate": 0.001,
+      "rows_sampled": 40000,
+      "text_len_chars": {
+        "mean": 347.9,
+        "p95": 1199.0
+      }
+    },
+    "fake_reviews_v2": {
+      "class_distribution": {
+        "0": 19954,
+        "1": 20046
+      },
+      "empty_text_rate": 0.0,
+      "exact_duplicate_rate": 0.0008,
+      "imbalance_ratio": 0.995,
+      "missing_values": {
+        "category": 0,
+        "label": 0,
+        "rating": 0,
+        "text": 0
+      },
+      "near_duplicate_rate": 0.001,
+      "rows_sampled": 40000,
+      "text_len_chars": {
+        "mean": 350.6,
+        "p95": 1208.0499999999956
+      }
+    },
+    "imdb": {
+      "class_distribution": {
+        "0": 12500,
+        "1": 12500
+      },
+      "empty_text_rate": 0.0,
+      "exact_duplicate_rate": 0.0039,
+      "imbalance_ratio": 1.0,
+      "missing_values": {
+        "label": 0,
+        "text": 0
+      },
+      "near_duplicate_rate": 0.0039,
+      "rows_sampled": 25000,
+      "text_len_chars": {
+        "mean": 1302.3,
+        "p95": 3379.0499999999993
+      }
+    },
+    "sst2": {
+      "class_distribution": {
+        "0": 17673,
+        "1": 22327
+      },
+      "empty_text_rate": 0.0,
+      "exact_duplicate_rate": 0.003,
+      "imbalance_ratio": 0.792,
+      "missing_values": {
+        "label": 0,
+        "text": 0
+      },
+      "near_duplicate_rate": 0.003,
+      "rows_sampled": 40000,
+      "text_len_chars": {
+        "mean": 52.5,
+        "p95": 143.0
+      }
+    },
+    "yelp_polarity": {
+      "class_distribution": {
+        "0": 21320,
+        "1": 18680
+      },
+      "empty_text_rate": 0.0,
+      "exact_duplicate_rate": 0.0,
+      "imbalance_ratio": 0.876,
+      "missing_values": {
+        "label": 0,
+        "text": 0
+      },
+      "near_duplicate_rate": 0.0,
+      "rows_sampled": 40000,
+      "text_len_chars": {
+        "mean": 703.9,
+        "p95": 1951.0
+      }
+    }
+  },
+  "distribution_shift": {
+    "amazon_vs_imdb_textlen_KS": 0.6198,
+    "amazon_vs_sst2_textlen_KS": 0.8867,
+    "amazon_vs_yelp_polarity_textlen_KS": 0.2121
+  },
+  "label_noise": {
+    "fake_reviews_v2": {
+      "confident_misclassification_rate": 0.0012,
+      "interpretation": "High-confidence disagreements are candidate mislabels or genuinely ambiguous items.",
+      "rows": 20000
+    }
+  }
+}

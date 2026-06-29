@@ -1,0 +1,230 @@
+{
+  "fake_reviews": {
+    "rows": 40526,
+    "features": [
+      "category",
+      "rating",
+      "text",
+      "label",
+      "len"
+    ],
+    "missing_values": {
+      "category": 0,
+      "rating": 0,
+      "text": 0,
+      "label": 0,
+      "len": 0
+    },
+    "class_distribution": {
+      "1": 20294,
+      "0": 20232
+    },
+    "label_meaning": {
+      "0": "original/authentic",
+      "1": "computer-generated/fake"
+    },
+    "text_word_length": {
+      "mean": 67.3,
+      "median": 38.0,
+      "p95": 234.0
+    }
+  },
+  "amazon_reviews": {
+    "rows": 450000,
+    "features": [
+      "rating",
+      "title",
+      "text",
+      "images",
+      "asin",
+      "parent_asin",
+      "user_id",
+      "timestamp",
+      "helpful_vote",
+      "verified_purchase",
+      "label"
+    ],
+    "missing_values": {
+      "rating": 0,
+      "title": 101,
+      "text": 97,
+      "images": 0,
+      "asin": 0,
+      "parent_asin": 0,
+      "user_id": 0,
+      "timestamp": 0,
+      "helpful_vote": 0,
+      "verified_purchase": 0,
+      "label": 0
+    },
+    "rating_distribution": {
+      "1": 36190,
+      "2": 20720,
+      "3": 34241,
+      "4": 62138,
+      "5": 296711
+    },
+    "sentiment_distribution": {
+      "positive": 358849,
+      "negative": 56910,
+      "neutral": 34241
+    },
+    "label_rule": "rating<=2 -> negative; 3 -> neutral; >=4 -> positive"
+  },
+  "amazon_meta": {
+    "rows": 180000,
+    "features": [
+      "main_category",
+      "title",
+      "average_rating",
+      "rating_number",
+      "features",
+      "description",
+      "price",
+      "images",
+      "videos",
+      "store",
+      "categories",
+      "details",
+      "parent_asin",
+      "bought_together",
+      "subtitle",
+      "author",
+      "source_category",
+      "price_float",
+      "avg_rating",
+      "n_ratings",
+      "seller_label",
+      "price_label"
+    ],
+    "missing_values": {
+      "main_category": 3876,
+      "title": 9,
+      "average_rating": 0,
+      "rating_number": 0,
+      "features": 0,
+      "description": 0,
+      "price": 119492,
+      "images": 0,
+      "videos": 0,
+      "store": 6535,
+      "categories": 0,
+      "details": 0,
+      "parent_asin": 0,
+      "bought_together": 180000,
+      "subtitle": 179962,
+      "author": 179983,
+      "source_category": 0,
+      "price_float": 0,
+      "avg_rating": 0,
+      "n_ratings": 0,
+      "seller_label": 0,
+      "price_label": 0
+    },
+    "numeric_describe": {
+      "avg_rating": {
+        "count": 180000.0,
+        "mean": 4.072,
+        "std": 0.789,
+        "min": 1.0,
+        "25%": 3.7,
+        "50%": 4.2,
+        "75%": 4.6,
+        "max": 5.0
+      },
+      "n_ratings": {
+        "count": 180000.0,
+        "mean": 154.588,
+        "std": 1317.263,
+        "min": 1.0,
+        "25%": 4.0,
+        "50%": 15.0,
+        "75%": 56.0,
+        "max": 194177.0
+      },
+      "price_float": {
+        "count": 180000.0,
+        "mean": 17.929,
+        "std": 113.595,
+        "min": 0.0,
+        "25%": 0.0,
+        "50%": 0.0,
+        "75%": 11.84,
+        "max": 13586.98
+      }
+    },
+    "numeric_correlation": {
+      "avg_rating": {
+        "avg_rating": 1.0,
+        "n_ratings": 0.057,
+        "price_float": 0.034
+      },
+      "n_ratings": {
+        "avg_rating": 0.057,
+        "n_ratings": 1.0,
+        "price_float": 0.008
+      },
+      "price_float": {
+        "avg_rating": 0.034,
+        "n_ratings": 0.008,
+        "price_float": 1.0
+      }
+    },
+    "seller_label_distribution": {
+      "mixed": 81792,
+      "weak": 63219,
+      "reliable": 34989
+    },
+    "price_label_distribution": {
+      "unknown": 119504,
+      "normal": 34216,
+      "high_price": 15430,
+      "suspicious_low": 10850
+    },
+    "category_counts": {
+      "All Beauty": 59983,
+      "Toys & Games": 48300,
+      "Computers": 16356,
+      "All Electronics": 14700,
+      "Camera & Photo": 8434,
+      "Cell Phones & Accessories": 5410,
+      "Home Audio & Theater": 4033,
+      "Amazon Home": 4031,
+      "AMAZON FASHION": 2515,
+      "Industrial & Scientific": 2357,
+      "Sports & Outdoors": 1824,
+      "Office Products": 1524,
+      "Tools & Home Improvement": 1227,
+      "Car Electronics": 1061,
+      "Automotive": 753,
+      "Arts, Crafts & Sewing": 748,
+      "Baby": 491,
+      "Health & Personal Care": 431,
+      "GPS & Navigation": 337,
+      "Musical Instruments": 336,
+      "Portable Audio & Accessories": 326,
+      "Amazon Devices": 294,
+      "Premium Beauty": 243,
+      "Video Games": 98,
+      "Pet Supplies": 87,
+      "Apple Products": 55,
+      "Books": 48,
+      "Grocery": 48,
+      "Software": 27,
+      "Appliances": 12,
+      "Amazon Fire TV": 9,
+      "Collectible Coins": 7,
+      "Entertainment": 5,
+      "Collectibles & Fine Art": 5,
+      "Movies & TV": 4,
+      "Buy a Kindle": 2,
+      "Handmade": 2,
+      "Fire Phone": 1
+    },
+    "seller_label_numeric_feature_importance": {
+      "avg_rating": 0.3635,
+      "n_ratings": 0.6107,
+      "price": 0.0258
+    }
+  }
+}

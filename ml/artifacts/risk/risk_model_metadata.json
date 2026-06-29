@@ -1,0 +1,81 @@
+{
+  "artifacts": {
+    "metadata": "artifacts/risk/risk_model_metadata.json",
+    "policy_model": "artifacts/risk/policy_clarity_tfidf_rf.joblib",
+    "price_model": "artifacts/risk/price_safety_tfidf_rf.joblib",
+    "seller_model": "artifacts/risk/seller_reliability_tfidf_rf.joblib"
+  },
+  "dataset": {
+    "name": "McAuley-Lab/Amazon-Reviews-2023:meta:All_Beauty",
+    "row_count": 112590,
+    "source": "huggingface",
+    "url": "https://amazon-reviews-2023.github.io/main.html"
+  },
+  "limitations": [
+    "Seller, price, and policy labels are weak labels derived from public metadata.",
+    "Current backend still uses deterministic rule-based scoring until these artifacts are explicitly integrated."
+  ],
+  "metrics": {
+    "policy_clarity": {
+      "status": "skipped_missing_policy_csv"
+    },
+    "price_safety": {
+      "accuracy": 0.6007,
+      "confusion_matrix": [
+        [
+          459,
+          315,
+          25
+        ],
+        [
+          521,
+          1328,
+          327
+        ],
+        [
+          43,
+          183,
+          340
+        ]
+      ],
+      "f1_macro": 0.5694,
+      "precision_macro": 0.5558,
+      "recall_macro": 0.5952
+    },
+    "seller_reliability": {
+      "accuracy": 0.5756,
+      "confusion_matrix": [
+        [
+          6032,
+          682,
+          3601
+        ],
+        [
+          1090,
+          467,
+          382
+        ],
+        [
+          3479,
+          323,
+          6462
+        ]
+      ],
+      "f1_macro": 0.4916,
+      "precision_macro": 0.5016,
+      "recall_macro": 0.4851
+    }
+  },
+  "model_name": "trustscore_weak_label_risk_models",
+  "model_version": "0.1.0",
+  "params": {
+    "categories": [
+      "All_Beauty"
+    ],
+    "policy_dataset": null,
+    "sample_size": 5000000,
+    "seed": 42,
+    "test_size": 0.2
+  },
+  "trained_at": "2026-05-11T00:59:55Z"
+}

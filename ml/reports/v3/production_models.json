@@ -1,0 +1,67 @@
+{
+  "demo_component_scores": {
+    "price_safety": 25,
+    "return_policy_clarity": 30,
+    "review_authenticity": 97,
+    "seller_reliability": 40,
+    "sentiment": 90,
+    "user_feedback_history": 50
+  },
+  "demo_product": {
+    "category_median": 60.0,
+    "price": 8.0,
+    "title": "Wireless Earbuds Pro"
+  },
+  "demo_risk_level": "Medium Risk",
+  "demo_trust_score": 65,
+  "selection": [
+    {
+      "artifact": "artifacts/v3/fake_review/model.joblib",
+      "leakage_safe": true,
+      "metric": "ROC-AUC 0.989 / acc 0.949 (in-domain), 0.91 cross-category",
+      "model": "calibrated LinearSVC + word/char TF-IDF",
+      "signal": "review_authenticity",
+      "version": "v3"
+    },
+    {
+      "artifact": "artifacts/v2/sentiment/sentiment_tfidf_logreg.joblib",
+      "leakage_safe": true,
+      "metric": "acc 0.867 (weak star labels)",
+      "model": "TF-IDF + LogReg (neg/neu/pos)",
+      "signal": "sentiment",
+      "version": "v2"
+    },
+    {
+      "artifact": "(rule, no artifact)",
+      "leakage_safe": true,
+      "metric": "deterministic",
+      "model": "transparent rule (rating/reviews/tenure)",
+      "signal": "seller_reliability",
+      "version": "v3"
+    },
+    {
+      "artifact": "artifacts/v3/risk/price_anomaly_iforest.joblib",
+      "leakage_safe": true,
+      "metric": "injected-anomaly recall 1.0",
+      "model": "unsupervised IsolationForest anomaly + ratio rule",
+      "signal": "price_safety",
+      "version": "v3"
+    },
+    {
+      "artifact": "(rule, no artifact)",
+      "leakage_safe": true,
+      "metric": "deterministic",
+      "model": "transparent rule (return/period/warranty)",
+      "signal": "return_policy_clarity",
+      "version": "v3"
+    }
+  ],
+  "weights": {
+    "price_safety": 0.1,
+    "return_policy_clarity": 0.15,
+    "review_authenticity": 0.3,
+    "seller_reliability": 0.2,
+    "sentiment": 0.2,
+    "user_feedback_history": 0.05
+  }
+}

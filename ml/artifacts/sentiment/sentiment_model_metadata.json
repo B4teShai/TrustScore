@@ -1,0 +1,54 @@
+{
+  "artifacts": {
+    "metadata": "artifacts/sentiment/sentiment_model_metadata.json",
+    "pipeline": "artifacts/sentiment/sentiment_tfidf_logreg.joblib"
+  },
+  "dataset": {
+    "name": "McAuley-Lab/Amazon-Reviews-2023:All_Beauty",
+    "row_count": 500000,
+    "source": "huggingface",
+    "url": "https://amazon-reviews-2023.github.io/main.html"
+  },
+  "limitations": [
+    "Sentiment labels are weak labels derived from star ratings.",
+    "This artifact is for fast local training; transformer fine-tuning can replace it later."
+  ],
+  "metrics": {
+    "accuracy": 0.8636,
+    "confusion_matrix": [
+      [
+        15556,
+        3354,
+        392
+      ],
+      [
+        1917,
+        5562,
+        937
+      ],
+      [
+        1249,
+        5793,
+        65240
+      ]
+    ],
+    "f1_macro": 0.7463,
+    "precision_macro": 0.7297,
+    "recall_macro": 0.7898
+  },
+  "model_name": "sentiment_tfidf_logistic_regression",
+  "model_version": "0.1.0",
+  "params": {
+    "categories": [
+      "All_Beauty"
+    ],
+    "max_features": 40000,
+    "max_iter": 500,
+    "max_ngram": 2,
+    "min_df": 2,
+    "sample_size": 500000,
+    "seed": 42,
+    "test_size": 0.2
+  },
+  "trained_at": "2026-05-11T01:02:19Z"
+}

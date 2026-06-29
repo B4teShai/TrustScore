@@ -1,0 +1,20 @@
+# Lean runtime deps for the API container. The dockerized stack serves the
+# `best` model set, whose sentiment signal uses the committed sklearn artifact,
+# so heavy optional deps (torch, transformers, playwright, supabase) are omitted
+# to keep the image small and the build fast. Use requirements.txt for a full
+# local install that also enables the transformers sentiment path and rendered
+# fetch.
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+httpx
+beautifulsoup4
+numpy
+pandas
+scikit-learn
+joblib
+SQLAlchemy
+psycopg[binary]
+anthropic

@@ -1,0 +1,8 @@
+{
+  "phase1_dataset_report": "ok",
+  "phase2_data_quality": "ok",
+  "phase2_leakage": "ok",
+  "phase3_features_shap": "ok",
+  "phase4_leaderboard": "ok",
+  "phase6_evaluation": "ok"
+}

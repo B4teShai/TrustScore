@@ -1,0 +1,20 @@
+{
+  "artifact": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/risk/seller_reliability_tfidf_rf.joblib",
+  "classes": [
+    "mixed",
+    "reliable",
+    "weak"
+  ],
+  "input": "pandas.DataFrame",
+  "label_score_map": {
+    "mixed": 60,
+    "reliable": 88,
+    "weak": 32
+  },
+  "model": "seller_reliability",
+  "numeric_features": [
+    "rating",
+    "log_review_count"
+  ],
+  "text_feature": "seller_text"
+}

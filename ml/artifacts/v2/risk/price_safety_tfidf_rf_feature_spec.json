@@ -1,0 +1,20 @@
+{
+  "artifact": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/risk/price_safety_tfidf_rf.joblib",
+  "classes": [
+    "high_price",
+    "normal",
+    "suspicious_low"
+  ],
+  "input": "pandas.DataFrame",
+  "label_score_map": {
+    "high_price": 65,
+    "normal": 90,
+    "suspicious_low": 35
+  },
+  "model": "price_safety",
+  "numeric_features": [
+    "price",
+    "price_ratio"
+  ],
+  "text_feature": "price_text"
+}

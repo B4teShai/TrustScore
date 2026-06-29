@@ -1,0 +1,40 @@
+{
+  "ablation": [
+    {
+      "accuracy": 0.7588,
+      "feature_set": "linguistic_only",
+      "roc_auc": 0.8485
+    },
+    {
+      "accuracy": 0.9258,
+      "feature_set": "tfidf_only",
+      "roc_auc": 0.9762
+    },
+    {
+      "accuracy": 0.7658,
+      "feature_set": "embeddings_only",
+      "roc_auc": 0.8515
+    },
+    {
+      "accuracy": 0.8242,
+      "feature_set": "embeddings_plus_linguistic",
+      "roc_auc": 0.9085
+    }
+  ],
+  "feature_gaps": {
+    "rating_velocity": "No time-series of ratings per seller/product in the metadata.",
+    "review_growth": "No longitudinal review-count snapshots available.",
+    "reviewer_history": "No per-reviewer id in the review datasets used.",
+    "seller_age": "No seller registration/first-seen date in the metadata."
+  },
+  "shap_linguistic_importance": {
+    "avg_word_len": 0.6168,
+    "caps_ratio": 0.0,
+    "char_len": 1.4934,
+    "exclaim_count": 0.1622,
+    "punct_ratio": 0.2113,
+    "type_token_ratio": 1.9956,
+    "word_len": 0.491
+  },
+  "task": "fake_review"
+}

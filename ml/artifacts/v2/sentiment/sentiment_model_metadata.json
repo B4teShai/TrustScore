@@ -1,0 +1,106 @@
+{
+  "artifacts": {
+    "metadata": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/sentiment/sentiment_model_metadata.json",
+    "pipeline": "/Users/altanshagai/Desktop/side/TrustScore/ml/artifacts/v2/sentiment/sentiment_tfidf_logreg.joblib"
+  },
+  "dataset": {
+    "name": "amazon_reviews_sample.csv",
+    "row_count": 449946,
+    "source": "/Users/altanshagai/Desktop/side/TrustScore/ml/data/amazon_reviews_sample.csv",
+    "url": "https://amazon-reviews-2023.github.io/main.html"
+  },
+  "limitations": [
+    "Sentiment labels are weak labels derived from star ratings.",
+    "Neutral (3-star) is the hardest class and drives most macro-F1 loss."
+  ],
+  "metrics": {
+    "test": {
+      "accuracy": 0.8667,
+      "confusion_matrix": [
+        [
+          9033,
+          2036,
+          312
+        ],
+        [
+          1651,
+          4233,
+          964
+        ],
+        [
+          1442,
+          5591,
+          64728
+        ]
+      ],
+      "f1_macro": 0.7203,
+      "precision_macro": 0.6942,
+      "recall_macro": 0.7713
+    },
+    "validation_model_selection": {
+      "linear_svc": {
+        "accuracy": 0.9017,
+        "confusion_matrix": [
+          [
+            7174,
+            472,
+            1459
+          ],
+          [
+            1444,
+            1312,
+            2722
+          ],
+          [
+            556,
+            425,
+            56428
+          ]
+        ],
+        "f1_macro": 0.6942,
+        "precision_macro": 0.769,
+        "recall_macro": 0.6701
+      },
+      "logreg": {
+        "accuracy": 0.8652,
+        "confusion_matrix": [
+          [
+            7116,
+            1711,
+            278
+          ],
+          [
+            1327,
+            3330,
+            821
+          ],
+          [
+            1162,
+            4408,
+            51839
+          ]
+        ],
+        "f1_macro": 0.7155,
+        "precision_macro": 0.6908,
+        "recall_macro": 0.7641
+      }
+    },
+    "winner": "logreg"
+  },
+  "model_name": "sentiment_v2_logreg",
+  "model_version": "0.2.0",
+  "params": {
+    "char_ngram": [
+      3,
+      5
+    ],
+    "max_features": 50000,
+    "seed": 42,
+    "test_size": 0.2,
+    "word_ngram": [
+      1,
+      2
+    ]
+  },
+  "trained_at": "2026-06-18T06:43:22Z"
+}

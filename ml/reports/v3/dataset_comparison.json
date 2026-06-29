@@ -1,0 +1,172 @@
+{
+  "datasets": [
+    {
+      "class_balance": 0.986,
+      "domain": "amazon product reviews",
+      "key": "amazon_polarity",
+      "label_distribution": {
+        "0": 49650,
+        "1": 50350
+      },
+      "license": "Apache-2.0 (HF card) / Amazon review data terms",
+      "license_openness": 0.9,
+      "notes": "Binary polarity (0 neg / 1 pos).",
+      "quality_score": 0.964,
+      "rank": 1,
+      "rows": 100000,
+      "size_score": 1.0,
+      "source": "fancyzhx/amazon_polarity",
+      "task": "sentiment"
+    },
+    {
+      "class_balance": 0.873,
+      "domain": "yelp business reviews",
+      "key": "yelp_polarity",
+      "label_distribution": {
+        "0": 53395,
+        "1": 46605
+      },
+      "license": "Yelp Dataset terms (research/personal)",
+      "license_openness": 0.6,
+      "notes": "Binary polarity; cross-domain test vs Amazon.",
+      "quality_score": 0.829,
+      "rank": 2,
+      "rows": 100000,
+      "size_score": 1.0,
+      "source": "fancyzhx/yelp_polarity",
+      "task": "sentiment"
+    },
+    {
+      "class_balance": 0.793,
+      "domain": "movie-review sentences",
+      "key": "sst2",
+      "label_distribution": {
+        "0": 29780,
+        "1": 37569
+      },
+      "license": "Permissive (GLUE/SST-2)",
+      "license_openness": 1.0,
+      "notes": "Short-sentence sentiment; test labels are hidden (-1) so train/validation only.",
+      "quality_score": 0.819,
+      "rank": 3,
+      "rows": 67349,
+      "size_score": 0.673,
+      "source": "stanfordnlp/sst2",
+      "task": "sentiment"
+    },
+    {
+      "class_balance": 1.0,
+      "domain": "amazon product reviews (multi-category)",
+      "key": "fake_review_cross",
+      "label_distribution": {
+        "0": 20216,
+        "1": 20216
+      },
+      "license": "Research use (Salminen et al. fake reviews)",
+      "license_openness": 0.6,
+      "notes": "Real vs computer-generated; category column enables OOD holdout.",
+      "quality_score": 0.701,
+      "rank": 4,
+      "rows": 40432,
+      "size_score": 0.404,
+      "source": "astrosbd/fake-review",
+      "task": "fake_review"
+    },
+    {
+      "class_balance": 0.997,
+      "domain": "amazon reviews",
+      "key": "fake_reviews_v2",
+      "label_distribution": {
+        "0": 20232,
+        "1": 20294
+      },
+      "license": "Research use (theArijitDas)",
+      "license_openness": 0.6,
+      "notes": "v1/v2 fake review training set.",
+      "quality_score": 0.7,
+      "rank": 5,
+      "rows": 40526,
+      "size_score": 0.405,
+      "source": "fake_reviews.csv",
+      "task": "fake_review"
+    },
+    {
+      "class_balance": 1.0,
+      "domain": "movie reviews",
+      "key": "imdb",
+      "label_distribution": {
+        "0": 12500,
+        "1": 12500
+      },
+      "license": "Research use (Maas et al. 2011)",
+      "license_openness": 0.6,
+      "notes": "Binary polarity; long-form, out-of-domain vs product reviews.",
+      "quality_score": 0.655,
+      "rank": 6,
+      "rows": 25000,
+      "size_score": 0.25,
+      "source": "stanfordnlp/imdb",
+      "task": "sentiment"
+    },
+    {
+      "class_balance": 0.0,
+      "domain": "amazon (3 categories)",
+      "key": "amazon_reviews_v2",
+      "label_distribution": {},
+      "license": "Amazon review data terms",
+      "license_openness": 0.4,
+      "notes": "v2 multi-category sentiment set (weak star labels).",
+      "quality_score": 0.42,
+      "rank": 7,
+      "rows": 450000,
+      "size_score": 1.0,
+      "source": "amazon_reviews_sample.csv",
+      "task": "sentiment"
+    },
+    {
+      "class_balance": 0.0,
+      "domain": "amazon metadata",
+      "key": "amazon_meta_v2",
+      "label_distribution": {},
+      "license": "Amazon review data terms",
+      "license_openness": 0.4,
+      "notes": "v2 risk metadata; weak-label leakage \u2014 see leakage_report.md.",
+      "quality_score": 0.42,
+      "rank": 8,
+      "rows": 180000,
+      "size_score": 1.0,
+      "source": "amazon_meta_sample.csv",
+      "task": "risk"
+    }
+  ],
+  "gated_documented": [
+    {
+      "key": "yelpchi",
+      "reason": "YelpChi (Rayana & Akoglu) requires author request; not redistributable on HF."
+    },
+    {
+      "key": "yelp_full",
+      "reason": "Full Yelp Open Dataset requires accepting Yelp's dataset agreement; manual download."
+    },
+    {
+      "key": "ieee_cis_fraud",
+      "reason": "Kaggle competition data; license requires Kaggle login + competition rules acceptance."
+    }
+  ],
+  "recommendation": {
+    "fake_review": "fake_review_cross (quality 0.701, 40432 rows, Research use (Salminen et al. fake reviews))",
+    "risk": "amazon_meta_v2 (quality 0.42, 180000 rows, Amazon review data terms)",
+    "sentiment": "amazon_polarity (quality 0.964, 100000 rows, Apache-2.0 (HF card) / Amazon review data terms)"
+  },
+  "unavailable": [
+    {
+      "key": "ott_deceptive",
+      "task": "fake_review",
+      "tried": [
+        "lukesjordan/deceptive-opinion-spam",
+        "kkfromus/deceptive-opinion-spam",
+        "deceptive-opinion"
+      ]
+    }
+  ]
+}

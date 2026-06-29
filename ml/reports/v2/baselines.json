@@ -1,0 +1,184 @@
+{
+  "fake_review": {
+    "majority_class_baseline": {
+      "accuracy": 0.5011,
+      "confusion_matrix": [
+        [
+          0,
+          3991
+        ],
+        [
+          0,
+          4009
+        ]
+      ],
+      "f1_macro": 0.3338,
+      "precision_macro": 0.2506,
+      "recall_macro": 0.5
+    },
+    "n_rows": 40000,
+    "tfidf_logreg_baseline": {
+      "accuracy": 0.9379,
+      "confusion_matrix": [
+        [
+          3782,
+          209
+        ],
+        [
+          288,
+          3721
+        ]
+      ],
+      "f1_macro": 0.9379,
+      "precision_macro": 0.938,
+      "recall_macro": 0.9379
+    }
+  },
+  "price_safety": {
+    "majority_class_baseline": {
+      "accuracy": 0.5585,
+      "confusion_matrix": [
+        [
+          0,
+          2061,
+          0
+        ],
+        [
+          0,
+          4468,
+          0
+        ],
+        [
+          0,
+          1471,
+          0
+        ]
+      ],
+      "f1_macro": 0.2389,
+      "precision_macro": 0.1862,
+      "recall_macro": 0.3333
+    },
+    "n_rows": 40000,
+    "tfidf_logreg_baseline": {
+      "accuracy": 0.6239,
+      "confusion_matrix": [
+        [
+          1425,
+          514,
+          122
+        ],
+        [
+          927,
+          2647,
+          894
+        ],
+        [
+          117,
+          435,
+          919
+        ]
+      ],
+      "f1_macro": 0.6084,
+      "precision_macro": 0.5961,
+      "recall_macro": 0.6362
+    }
+  },
+  "seller_reliability": {
+    "majority_class_baseline": {
+      "accuracy": 0.455,
+      "confusion_matrix": [
+        [
+          3640,
+          0,
+          0
+        ],
+        [
+          1531,
+          0,
+          0
+        ],
+        [
+          2829,
+          0,
+          0
+        ]
+      ],
+      "f1_macro": 0.2085,
+      "precision_macro": 0.1517,
+      "recall_macro": 0.3333
+    },
+    "n_rows": 40000,
+    "tfidf_logreg_baseline": {
+      "accuracy": 0.4703,
+      "confusion_matrix": [
+        [
+          1420,
+          965,
+          1255
+        ],
+        [
+          450,
+          823,
+          258
+        ],
+        [
+          881,
+          429,
+          1519
+        ]
+      ],
+      "f1_macro": 0.4673,
+      "precision_macro": 0.4628,
+      "recall_macro": 0.4882
+    }
+  },
+  "sentiment": {
+    "majority_class_baseline": {
+      "accuracy": 0.7986,
+      "confusion_matrix": [
+        [
+          0,
+          0,
+          1018
+        ],
+        [
+          0,
+          0,
+          593
+        ],
+        [
+          0,
+          0,
+          6389
+        ]
+      ],
+      "f1_macro": 0.296,
+      "precision_macro": 0.2662,
+      "recall_macro": 0.3333
+    },
+    "n_rows": 40000,
+    "tfidf_logreg_baseline": {
+      "accuracy": 0.8646,
+      "confusion_matrix": [
+        [
+          838,
+          139,
+          41
+        ],
+        [
+          159,
+          338,
+          96
+        ],
+        [
+          167,
+          481,
+          5741
+        ]
+      ],
+      "f1_macro": 0.7133,
+      "precision_macro": 0.6831,
+      "recall_macro": 0.7639
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "label_column": "label",
+  "label_mapping": {
+    "0": "original_authentic",
+    "1": "computer_generated_fake"
+  },
+  "text_column": "text",
+  "vectorizer": {
+    "char_ngram": [
+      3,
+      5
+    ],
+    "max_features": 40000,
+    "type": "FeatureUnion(word_tfidf + char_wb_tfidf)",
+    "winner": "linear_svc",
+    "word_ngram": [
+      1,
+      2
+    ]
+  }
+}

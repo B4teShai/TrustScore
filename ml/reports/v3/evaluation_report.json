@@ -1,0 +1,211 @@
+{
+  "fake_review_calibration_robustness": {
+    "calibration": {
+      "isotonic": {
+        "brier": 0.0538,
+        "ece": 0.0073
+      },
+      "raw": {
+        "brier": 0.058,
+        "ece": 0.0782
+      }
+    },
+    "robustness": {
+      "baseline_accuracy": 0.9323,
+      "perturbed": {
+        "drop_vowels_10pct": {
+          "accuracy": 0.9096,
+          "delta": -0.0226
+        },
+        "lowercase": {
+          "accuracy": 0.9323,
+          "delta": 0.0
+        },
+        "truncate_50_chars": {
+          "accuracy": 0.6949,
+          "delta": -0.2374
+        }
+      }
+    }
+  },
+  "fake_review_ood": {
+    "in_domain_random_split": {
+      "accuracy": 0.9346,
+      "roc_auc": 0.9831
+    },
+    "mean_ood_accuracy": 0.9102,
+    "per_category": [
+      {
+        "accuracy": 0.9156,
+        "holdout": "Kindle_Store",
+        "n": 4730,
+        "roc_auc": 0.9758
+      },
+      {
+        "accuracy": 0.9048,
+        "holdout": "Books",
+        "n": 4370,
+        "roc_auc": 0.975
+      },
+      {
+        "accuracy": 0.9031,
+        "holdout": "Pet_Supplies",
+        "n": 4254,
+        "roc_auc": 0.9742
+      },
+      {
+        "accuracy": 0.9406,
+        "holdout": "Home_and_Kitchen",
+        "n": 4056,
+        "roc_auc": 0.9852
+      },
+      {
+        "accuracy": 0.9233,
+        "holdout": "Electronics",
+        "n": 3988,
+        "roc_auc": 0.9814
+      },
+      {
+        "accuracy": 0.9306,
+        "holdout": "Sports_and_Outdoors",
+        "n": 3946,
+        "roc_auc": 0.9836
+      },
+      {
+        "accuracy": 0.93,
+        "holdout": "Tools_and_Home_Improvement",
+        "n": 3858,
+        "roc_auc": 0.9827
+      },
+      {
+        "accuracy": 0.9015,
+        "holdout": "Clothing_Shoes_and_Jewelry",
+        "n": 3848,
+        "roc_auc": 0.9646
+      },
+      {
+        "accuracy": 0.8919,
+        "holdout": "Toys_and_Games",
+        "n": 3794,
+        "roc_auc": 0.9713
+      },
+      {
+        "accuracy": 0.8601,
+        "holdout": "Movies_and_TV",
+        "n": 3588,
+        "roc_auc": 0.9658
+      }
+    ]
+  },
+  "risk_leakage_reference": {
+    "price_label": {
+      "leakage": {
+        "label_reconstruction_accuracy": 1.0,
+        "mutual_information": {
+          "price": 0.7342,
+          "price_ratio": 0.979
+        },
+        "numeric_features": [
+          "price",
+          "price_ratio"
+        ],
+        "recovered_rule_excerpt": "|--- price_ratio <= 1.80\n|   |--- price_ratio <= 0.50\n|   |   |--- class: suspicious_low\n|   |--- price_ratio >  0.50\n|   |   |--- price_ratio <= 1.80\n|   |   |   |--- class: normal\n|   |   |--- price_ratio >  1.80\n|   |   |   |--- price <= 37.76\n|   |   |   |   |--- class: high_price\n|   |   |   |--- price >  37.76\n|   |   |   |   |--- class: normal\n|--- price_ratio >  1.80\n|   |--- class: high_price\n"
+      },
+      "leave_one_category_out": {
+        "categories": [
+          "All_Beauty",
+          "Electronics",
+          "Toys_and_Games"
+        ],
+        "mean_numeric_ood_acc": 1.0,
+        "mean_text_only_ood_acc": 0.5431,
+        "per_holdout": [
+          {
+            "holdout": "All_Beauty",
+            "numeric_ood_acc": 0.9999,
+            "text_only_ood_acc": 0.5989
+          },
+          {
+            "holdout": "Electronics",
+            "numeric_ood_acc": 1.0,
+            "text_only_ood_acc": 0.4842
+          },
+          {
+            "holdout": "Toys_and_Games",
+            "numeric_ood_acc": 1.0,
+            "text_only_ood_acc": 0.5463
+          }
+        ]
+      }
+    },
+    "seller_label": {
+      "leakage": {
+        "label_reconstruction_accuracy": 1.0,
+        "mutual_information": {
+          "log_review_count": 0.6437,
+          "rating": 0.487
+        },
+        "numeric_features": [
+          "rating",
+          "log_review_count"
+        ],
+        "recovered_rule_excerpt": "|--- log_review_count <= 1.70\n|   |--- class: weak\n|--- log_review_count >  1.70\n|   |--- log_review_count <= 3.92\n|   |   |--- rating <= 3.45\n|   |   |   |--- class: weak\n|   |   |--- rating >  3.45\n|   |   |   |--- class: mixed\n|   |--- log_review_count >  3.92\n|   |   |--- rating <= 4.15\n|   |   |   |--- rating <= 3.45\n|   |   |   |   |--- class: weak\n|   |   |   |--- rating >  3.45\n|   |   |   |   |--- class: mixed\n|   |   |--- rating >  4.15\n|   |   |   |--- class: reliable\n"
+      },
+      "leave_one_category_out": {
+        "categories": [
+          "All_Beauty",
+          "Electronics",
+          "Toys_and_Games"
+        ],
+        "mean_numeric_ood_acc": 1.0,
+        "mean_text_only_ood_acc": 0.3953,
+        "per_holdout": [
+          {
+            "holdout": "All_Beauty",
+            "numeric_ood_acc": 1.0,
+            "text_only_ood_acc": 0.4543
+          },
+          {
+            "holdout": "Electronics",
+            "numeric_ood_acc": 1.0,
+            "text_only_ood_acc": 0.3734
+          },
+          {
+            "holdout": "Toys_and_Games",
+            "numeric_ood_acc": 1.0,
+            "text_only_ood_acc": 0.3582
+          }
+        ]
+      }
+    }
+  },
+  "sentiment_cross_domain": {
+    "cross_domain": {
+      "imdb": {
+        "accuracy": 0.8584,
+        "f1": 0.8509,
+        "n": 25000,
+        "roc_auc": 0.9405
+      },
+      "sst2": {
+        "accuracy": 0.7239,
+        "f1": 0.7708,
+        "n": 40000,
+        "roc_auc": 0.7977
+      },
+      "yelp_polarity": {
+        "accuracy": 0.8889,
+        "f1": 0.8813,
+        "n": 40000,
+        "roc_auc": 0.957
+      }
+    },
+    "in_domain": {
+      "accuracy": 0.8985,
+      "f1": 0.8992,
+      "n": 8000,
+      "roc_auc": 0.9647
+    },
+    "train": "amazon_polarity"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "artifacts": {
+    "feature_config": "artifacts/fake_full/fake_review_feature_config.json",
+    "metadata": "artifacts/fake_full/model_metadata.json",
+    "model": "artifacts/fake_full/fake_review_rf.joblib",
+    "vectorizer": "artifacts/fake_full/fake_review_vectorizer.joblib"
+  },
+  "dataset": {
+    "name": "theArijitDas/Fake-Reviews-Dataset",
+    "row_count": 40526,
+    "source": "huggingface",
+    "url": "https://huggingface.co/datasets/theArijitDas/Fake-Reviews-Dataset"
+  },
+  "limitations": [
+    "Labels distinguish original reviews from generated fake reviews, not every real-world fraud pattern.",
+    "Backend aggregation averages review-level probabilities at product level."
+  ],
+  "metrics": {
+    "accuracy": 0.9078,
+    "confusion_matrix": [
+      [
+        3755,
+        292
+      ],
+      [
+        455,
+        3604
+      ]
+    ],
+    "f1": 0.9061,
+    "precision": 0.9251,
+    "recall": 0.8879,
+    "roc_auc": 0.9659
+  },
+  "model_name": "fake_review_random_forest",
+  "model_version": "0.1.0",
+  "params": {
+    "max_features": 30000,
+    "max_ngram": 2,
+    "min_df": 2,
+    "min_samples_leaf": 2,
+    "n_estimators": 300,
+    "sample_size": 4000000,
+    "seed": 42,
+    "test_size": 0.2
+  },
+  "trained_at": "2026-05-11T01:06:12Z"
+}

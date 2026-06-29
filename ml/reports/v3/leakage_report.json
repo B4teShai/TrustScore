@@ -1,0 +1,85 @@
+{
+  "models": {
+    "price_label": {
+      "leakage": {
+        "label_reconstruction_accuracy": 1.0,
+        "mutual_information": {
+          "price": 0.7342,
+          "price_ratio": 0.979
+        },
+        "numeric_features": [
+          "price",
+          "price_ratio"
+        ],
+        "recovered_rule_excerpt": "|--- price_ratio <= 1.80\n|   |--- price_ratio <= 0.50\n|   |   |--- class: suspicious_low\n|   |--- price_ratio >  0.50\n|   |   |--- price_ratio <= 1.80\n|   |   |   |--- class: normal\n|   |   |--- price_ratio >  1.80\n|   |   |   |--- price <= 37.76\n|   |   |   |   |--- class: high_price\n|   |   |   |--- price >  37.76\n|   |   |   |   |--- class: normal\n|--- price_ratio >  1.80\n|   |--- class: high_price\n"
+      },
+      "leave_one_category_out": {
+        "categories": [
+          "All_Beauty",
+          "Electronics",
+          "Toys_and_Games"
+        ],
+        "mean_numeric_ood_acc": 1.0,
+        "mean_text_only_ood_acc": 0.5431,
+        "per_holdout": [
+          {
+            "holdout": "All_Beauty",
+            "numeric_ood_acc": 0.9999,
+            "text_only_ood_acc": 0.5989
+          },
+          {
+            "holdout": "Electronics",
+            "numeric_ood_acc": 1.0,
+            "text_only_ood_acc": 0.4842
+          },
+          {
+            "holdout": "Toys_and_Games",
+            "numeric_ood_acc": 1.0,
+            "text_only_ood_acc": 0.5463
+          }
+        ]
+      }
+    },
+    "seller_label": {
+      "leakage": {
+        "label_reconstruction_accuracy": 1.0,
+        "mutual_information": {
+          "log_review_count": 0.6437,
+          "rating": 0.487
+        },
+        "numeric_features": [
+          "rating",
+          "log_review_count"
+        ],
+        "recovered_rule_excerpt": "|--- log_review_count <= 1.70\n|   |--- class: weak\n|--- log_review_count >  1.70\n|   |--- log_review_count <= 3.92\n|   |   |--- rating <= 3.45\n|   |   |   |--- class: weak\n|   |   |--- rating >  3.45\n|   |   |   |--- class: mixed\n|   |--- log_review_count >  3.92\n|   |   |--- rating <= 4.15\n|   |   |   |--- rating <= 3.45\n|   |   |   |   |--- class: weak\n|   |   |   |--- rating >  3.45\n|   |   |   |   |--- class: mixed\n|   |   |--- rating >  4.15\n|   |   |   |--- class: reliable\n"
+      },
+      "leave_one_category_out": {
+        "categories": [
+          "All_Beauty",
+          "Electronics",
+          "Toys_and_Games"
+        ],
+        "mean_numeric_ood_acc": 1.0,
+        "mean_text_only_ood_acc": 0.3953,
+        "per_holdout": [
+          {
+            "holdout": "All_Beauty",
+            "numeric_ood_acc": 1.0,
+            "text_only_ood_acc": 0.4543
+          },
+          {
+            "holdout": "Electronics",
+            "numeric_ood_acc": 1.0,
+            "text_only_ood_acc": 0.3734
+          },
+          {
+            "holdout": "Toys_and_Games",
+            "numeric_ood_acc": 1.0,
+            "text_only_ood_acc": 0.3582
+          }
+        ]
+      }
+    }
+  },
+  "rows": 180000
+}

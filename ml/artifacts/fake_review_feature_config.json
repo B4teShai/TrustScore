@@ -1,0 +1,18 @@
+{
+  "label_column": "label",
+  "label_mapping": {
+    "0": "original_authentic",
+    "1": "computer_generated_fake"
+  },
+  "text_column": "text",
+  "vectorizer": {
+    "max_features": 30000,
+    "min_df": 2,
+    "ngram_range": [
+      1,
+      2
+    ],
+    "sublinear_tf": true,
+    "type": "TfidfVectorizer"
+  }
+}
