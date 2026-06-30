@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 RiskLevel = Literal["Low Risk", "Medium Risk", "High Risk"]
 FeedbackStatus = Literal["saved", "accepted"]
+TargetMarket = Literal["auto", "US", "JP", "EU", "UK"]
 ComponentKey = Literal[
     "review_authenticity",
     "seller_reliability",
@@ -33,6 +34,12 @@ class StrictBaseModel(BaseModel):
     """Base schema that rejects unexpected request or response fields."""
 
     model_config = ConfigDict(extra="forbid")
+
+
+class LenientBaseModel(BaseModel):
+    """Boundary schema for browser-extracted fields that are sanitized later."""
+
+    model_config = ConfigDict(extra="ignore")
 
 
 class SellerInfo(StrictBaseModel):
@@ -78,6 +85,11 @@ class ProductAnalysisRequest(StrictBaseModel):
         description="Page language (BCP-47), used to localize reasons and guidance.",
         examples=["ja-JP", "en-US"],
     )
+    target_market: TargetMarket = Field(
+        default="auto",
+        description="Target shopping market used to normalize marketplace currency.",
+        examples=["US", "JP", "EU", "UK"],
+    )
 
 
 class ProductPageData(StrictBaseModel):
@@ -104,6 +116,24 @@ class ProductPageData(StrictBaseModel):
     price: float | None = Field(default=None, ge=0, examples=[29.99])
     currency: str | None = Field(default=None, max_length=16, examples=["USD"])
     average_market_price: float | None = Field(default=None, gt=0, examples=[59.99])
+    market_reference_count: int | None = Field(default=None, ge=0, examples=[12])
+    market_reference_source: str | None = Field(default=None, max_length=80, examples=["Serper"])
+    market_reference_original_currency: str | None = Field(
+        default=None,
+        max_length=16,
+        examples=["USD"],
+    )
+    market_reference_exchange_rate: float | None = Field(default=None, gt=0, examples=[156.2])
+    market_reference_exchange_rate_source: str | None = Field(
+        default=None,
+        max_length=80,
+        examples=["Frankfurter"],
+    )
+    market_reference_exchange_rate_date: str | None = Field(
+        default=None,
+        max_length=32,
+        examples=["2026-06-30"],
+    )
     seller: SellerInfo | None = None
     return_policy: str | None = Field(
         default=None,
@@ -121,16 +151,25 @@ class ProductPageData(StrictBaseModel):
     )
 
 
-class ExtractedSellerInfo(StrictBaseModel):
+class ExtractedSellerInfo(LenientBaseModel):
     """Lenient seller details accepted from an active-tab preview."""
 
     name: str | None = Field(default=None, max_length=1000)
-    rating: float | None = Field(default=None, ge=0, le=5)
+    rating: float | None = Field(default=None, ge=0)
     review_count: int | None = Field(default=None, ge=0)
     years_active: int | None = Field(default=None, ge=0)
 
 
-class ExtractedProductData(StrictBaseModel):
+class ExtractedReviewInput(LenientBaseModel):
+    """Lenient review details accepted from an active-tab preview."""
+
+    text: str = Field(..., min_length=1, max_length=4000)
+    rating: float | None = Field(default=None, ge=0)
+    date: str | None = Field(default=None, max_length=128)
+    verified_purchase: bool | None = None
+
+
+class ExtractedProductData(LenientBaseModel):
     """Lenient product fields accepted from the active-tab preview boundary."""
 
     url: str = Field(..., min_length=1, max_length=8192)
@@ -143,13 +182,13 @@ class ExtractedProductData(StrictBaseModel):
     average_market_price: float | None = Field(default=None, gt=0)
     seller: ExtractedSellerInfo | None = None
     return_policy: str | None = Field(default=None, max_length=4000)
-    reviews: list[ReviewInput] = Field(default_factory=list, max_length=50)
-    rating: float | None = Field(default=None, ge=0, le=5)
+    reviews: list[ExtractedReviewInput] = Field(default_factory=list, max_length=50)
+    rating: float | None = Field(default=None, ge=0)
     review_count: int | None = Field(default=None, ge=0)
     units_bought_recent: int | None = Field(default=None, ge=0)
 
 
-class ExtractedProductScanRequest(StrictBaseModel):
+class ExtractedProductScanRequest(LenientBaseModel):
     """Minimal active-tab product data used when server-side fetching is blocked."""
 
     product: ExtractedProductData
@@ -163,6 +202,11 @@ class ExtractedProductScanRequest(StrictBaseModel):
         max_length=35,
         description="Page language (BCP-47), used to localize reasons and guidance.",
         examples=["ja-JP", "en-US"],
+    )
+    target_market: TargetMarket = Field(
+        default="auto",
+        description="Target shopping market used to normalize marketplace currency.",
+        examples=["US", "JP", "EU", "UK"],
     )
 
 

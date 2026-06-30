@@ -13,6 +13,16 @@ def test_clean_review_text_removes_html_and_normalizes_whitespace() -> None:
     assert clean_review_text(" <b>Great</b>\n product&nbsp; ") == "great product"
 
 
+def test_clean_review_text_removes_marketplace_boilerplate() -> None:
+    assert (
+        clean_review_text(
+            "Brief content visible, double tap to read full content. "
+            "Very high quality. Read more Read less"
+        )
+        == "very high quality."
+    )
+
+
 def test_review_features_detect_duplicates_and_suspicious_patterns() -> None:
     features = extract_review_features(
         [

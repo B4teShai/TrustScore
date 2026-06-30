@@ -82,11 +82,18 @@ select {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: var(--brand-grad);
+  background: transparent;
   display: grid;
   place-items: center;
   color: white;
-  box-shadow: 0 4px 10px -2px rgba(79, 70, 229, 0.45);
+  box-shadow: none;
+}
+
+.logo img {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: block;
 }
 
 .brand-name {
@@ -123,24 +130,6 @@ select {
 
 .popup-body {
   padding: 16px;
-}
-
-.popup-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-top: 1px solid var(--border-2);
-  margin-top: auto;
-  padding: 10px 16px;
-  background: var(--surface-2);
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.version {
-  margin-left: auto;
-  color: var(--muted-2);
-  font-family: var(--font-mono);
 }
 
 .card {
@@ -646,6 +635,21 @@ select {
   line-height: 1.35;
 }
 
+.confidence-banner {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--med-ring);
+  border-radius: 8px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  background: var(--med-bg);
+  color: var(--med);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
 .sec-h {
   display: flex;
   align-items: center;
@@ -694,6 +698,75 @@ select {
 .metrics-list {
   display: grid;
   gap: 7px;
+}
+
+.signal-coverage {
+  display: grid;
+  gap: 7px;
+}
+
+.coverage-item {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--surface);
+}
+
+.coverage-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+}
+
+.coverage-copy {
+  min-width: 0;
+}
+
+.coverage-copy .sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coverage-status {
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.coverage-item.is-read .coverage-icon,
+.coverage-item.is-read .coverage-status {
+  background: var(--low-bg);
+  color: var(--low);
+}
+
+.coverage-item.is-partial .coverage-icon,
+.coverage-item.is-partial .coverage-status {
+  background: var(--med-bg);
+  color: var(--med);
+}
+
+.coverage-item.is-missing .coverage-icon,
+.coverage-item.is-missing .coverage-status {
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
+.coverage-item.is-not-scored .coverage-icon,
+.coverage-item.is-not-scored .coverage-status {
+  background: var(--surface-3);
+  color: var(--muted);
 }
 
 .evidence-list {
@@ -909,26 +982,31 @@ select {
   outline: none;
 }
 
-.fb-structured {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+.fb-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
   margin-top: 10px;
 }
 
-.fb-structured select {
-  min-width: 0;
+.fb-chip {
+  appearance: none;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--surface);
   color: var(--ink-2);
-  padding: 7px 8px;
+  cursor: pointer;
+  padding: 6px 9px;
   font-size: 11.5px;
+  font-weight: 600;
   outline: none;
 }
 
-.fb-structured select:focus {
+.fb-chip:hover,
+.fb-chip:focus,
+.fb-chip.is-active {
   border-color: var(--brand);
+  color: var(--brand);
   box-shadow: 0 0 0 3px var(--brand-50);
 }
 

@@ -14,6 +14,7 @@ from app.services.ai_feedback import (
     generate_feedback,
     normalize_language,
 )
+from app.services.market_reference import market_reference_count_from_signals
 from app.schemas.product_analysis import (
     ComponentEvidence,
     ComponentScores,
@@ -37,10 +38,12 @@ def build_trustscore(
     locale: str | None = None,
 ) -> ProductAnalysisResponse:
     """Run preprocessing, inference fallbacks, and final TrustScore calculation."""
+    signals = extraction_signals or []
     review_features = extract_review_features(payload.reviews)
     sentiment = sentiment_service.score_product(review_features, payload.rating)
     fake_reviews = fake_review_service.score_product(review_features)
     risk_scores = score_risk_signals(payload)
+    active_components = _active_components(payload)
 
     component_scores = ComponentScores(
         review_authenticity=fake_reviews.authenticity_score,
@@ -50,10 +53,10 @@ def build_trustscore(
         price_safety=risk_scores.price_safety,
         user_feedback_history=50,
     )
-    trust_score = calculate_trustscore(component_scores)
+    trust_score = calculate_trustscore(component_scores, active_components=active_components)
     risk_level = classify_risk(trust_score)
-    missing_inputs = _missing_inputs(payload, review_features.total_reviews)
-    english_reasons = top_reasons(component_scores)
+    missing_inputs = _missing_inputs(payload, review_features.total_reviews, signals)
+    english_reasons = top_reasons(component_scores, active_components=active_components)
     language = normalize_language(locale)
     confidence = _confidence(
         review_count=review_features.total_reviews,
@@ -101,6 +104,8 @@ def build_trustscore(
             seller_completeness=risk_scores.seller_completeness,
             price_completeness=risk_scores.price_completeness,
             policy_completeness=risk_scores.policy_completeness,
+            active_components=active_components,
+            extraction_signals=signals,
         ),
         missing_inputs=missing_inputs,
         score_semantics=(
@@ -113,13 +118,13 @@ def build_trustscore(
         language=language,
         model_version=settings.model_version,
         fetch_mode=fetch_mode,
-        extraction_signals=extraction_signals or [],
+        extraction_signals=signals,
         model_modes={
             "fake_review": fake_reviews.mode,
             "sentiment": sentiment.mode,
             "seller_reliability": risk_scores.seller_mode,
-            "price_safety": risk_scores.price_mode,
-            "return_policy_clarity": risk_scores.policy_mode,
+            "price_safety": _price_mode(payload, risk_scores.price_mode, signals),
+            "return_policy_clarity": _policy_mode(payload, risk_scores.policy_mode),
             "user_feedback_history": "not_applied",
         },
         model_artifact_status={
@@ -196,25 +201,40 @@ def _confidence(
     return round(max(0.05, min(0.98, confidence)), 2)
 
 
-def _missing_inputs(payload: ProductPageData, review_count: int) -> list[str]:
+def _active_components(payload: ProductPageData) -> set[str]:
+    active = {"review_authenticity", "seller_reliability", "sentiment"}
+    if payload.price is not None and payload.average_market_price is not None:
+        active.add("price_safety")
+    if payload.return_policy:
+        active.add("return_policy_clarity")
+    return active
+
+
+def _price_mode(payload: ProductPageData, default_mode: str, signals: list[str]) -> str:
+    ignored_currency = _ignored_price_currency(signals) if payload.price is None else None
+    if ignored_currency:
+        return f"not_scored_localized_currency:{ignored_currency}"
+    if payload.price is None:
+        return "not_scored_missing_price"
+    if payload.average_market_price is None:
+        return "not_scored_missing_market_reference"
+    return default_mode
+
+
+def _policy_mode(payload: ProductPageData, default_mode: str) -> str:
+    if not payload.return_policy:
+        return "not_scored_missing_policy"
+    return default_mode
+
+
+def _missing_inputs(payload: ProductPageData, review_count: int, signals: list[str]) -> list[str]:
     missing: list[str] = []
     if review_count == 0:
         missing.append("visible review text")
     if payload.seller is None:
         missing.append("seller profile")
-    else:
-        if payload.seller.rating is None:
-            missing.append("seller rating")
-        if payload.seller.review_count is None:
-            missing.append("seller review count")
-        if payload.seller.years_active is None:
-            missing.append("seller tenure")
-    if payload.price is None:
+    if payload.price is None and not _ignored_price_currency(signals):
         missing.append("product price")
-    if payload.average_market_price is None:
-        missing.append("market price reference")
-    if not payload.return_policy:
-        missing.append("return policy text")
     return missing
 
 
@@ -230,6 +250,8 @@ def _component_evidence(
     seller_completeness: float,
     price_completeness: float,
     policy_completeness: float,
+    active_components: set[str],
+    extraction_signals: list[str],
 ) -> list[ComponentEvidence]:
     seller_evidence: list[str] = []
     seller_missing: list[str] = []
@@ -238,14 +260,10 @@ def _component_evidence(
             seller_evidence.append(f"Seller: {payload.seller.name}")
         if payload.seller.rating is not None:
             seller_evidence.append(f"Seller rating: {payload.seller.rating:.1f}/5")
-        else:
-            seller_missing.append("seller rating")
         if payload.seller.review_count is not None:
             seller_evidence.append(f"Seller reviews: {payload.seller.review_count}")
-        else:
-            seller_missing.append("seller review count")
-        if payload.seller.years_active is None:
-            seller_missing.append("seller tenure")
+        if payload.seller.years_active is not None:
+            seller_evidence.append(f"Seller tenure: {payload.seller.years_active} years")
     else:
         seller_missing.append("seller profile")
 
@@ -258,23 +276,58 @@ def _component_evidence(
 
     price_evidence = []
     price_missing = []
+    ignored_currency = _ignored_price_currency(extraction_signals) if payload.price is None else None
+    market_reference_count = payload.market_reference_count or market_reference_count_from_signals(
+        extraction_signals
+    )
     if payload.price is not None:
-        price_evidence.append(f"Listed price: {_money(payload.price, payload.currency)}")
+        if payload.average_market_price is not None:
+            price_evidence.append(f"Listed price: {_money(payload.price, payload.currency)}")
+        else:
+            price_evidence.append(f"Listed price only: {_money(payload.price, payload.currency)}")
     else:
-        price_missing.append("product price")
-    if payload.average_market_price is not None:
-        price_evidence.append(
-            f"Market reference: {_money(payload.average_market_price, payload.currency)}"
+        if ignored_currency:
+            price_evidence.append(f"Price not used: localized marketplace currency ({ignored_currency})")
+        else:
+            price_missing.append("product price")
+    if payload.average_market_price is not None and not ignored_currency:
+        source = payload.market_reference_source or "market"
+        count_label = (
+            f" from {market_reference_count} comparable listings"
+            if market_reference_count
+            else ""
         )
-    else:
-        price_missing.append("market price reference")
+        price_evidence.append(
+            f"Market reference found{count_label}: {_money(payload.average_market_price, payload.currency)}"
+            f" ({source})"
+        )
+        if (
+            payload.market_reference_original_currency
+            and payload.market_reference_exchange_rate is not None
+            and payload.market_reference_exchange_rate_source
+        ):
+            date_label = (
+                f", {payload.market_reference_exchange_rate_date}"
+                if payload.market_reference_exchange_rate_date
+                else ""
+            )
+            price_evidence.append(
+                "Converted market reference from "
+                f"{payload.market_reference_original_currency}: "
+                f"1 {payload.market_reference_original_currency} = "
+                f"{_money(payload.market_reference_exchange_rate, payload.currency)} "
+                f"({payload.market_reference_exchange_rate_source}{date_label})"
+            )
+    elif payload.price is not None and not ignored_currency:
+        price_evidence.append("No verified market reference found.")
+        price_missing.append("verified same-currency market reference")
 
     policy_evidence = []
     policy_missing = []
     if payload.return_policy:
         policy_evidence.append(f"Policy snippet: {_short(payload.return_policy, 120)}")
     else:
-        policy_missing.append("return policy text")
+        policy_evidence.append("Return policy not visible on this page.")
 
     review_evidence = []
     review_missing = []
@@ -304,7 +357,7 @@ def _component_evidence(
         ),
         ComponentEvidence(
             component="seller_reliability",
-            summary="Seller reliability uses visible seller rating, review volume, and tenure when available.",
+            summary="Seller reliability uses seller identity and marketplace popularity when direct reputation is unavailable.",
             evidence=seller_evidence,
             missing_inputs=seller_missing,
             confidence=seller_completeness,
@@ -318,17 +371,22 @@ def _component_evidence(
         ),
         ComponentEvidence(
             component="return_policy_clarity",
-            summary="Return-policy clarity checks visible return, refund, period, and warranty wording.",
+            summary=(
+                "Return-policy clarity checks visible policy wording when available; "
+                "missing policy text is not scored."
+            ),
             evidence=policy_evidence,
             missing_inputs=policy_missing,
-            confidence=policy_completeness,
+            confidence=policy_completeness if "return_policy_clarity" in active_components else 0.0,
         ),
         ComponentEvidence(
             component="price_safety",
-            summary="Price safety needs both listed price and a market reference to flag anomalies.",
+            summary=(
+                "Price safety is scored only with a verified same-currency market reference."
+            ),
             evidence=price_evidence,
             missing_inputs=price_missing,
-            confidence=price_completeness,
+            confidence=price_completeness if "price_safety" in active_components else 0.0,
         ),
         ComponentEvidence(
             component="user_feedback_history",
@@ -356,6 +414,14 @@ def _money(value: float, currency: str | None) -> str:
     if currency and currency.upper() in _ZERO_DECIMAL_CURRENCIES:
         return f"{prefix}{value:,.0f}"
     return f"{prefix}{value:,.2f}"
+
+
+def _ignored_price_currency(signals: list[str]) -> str | None:
+    prefix = "price_ignored_localized_currency:"
+    for signal in signals:
+        if signal.startswith(prefix):
+            return signal.removeprefix(prefix)
+    return None
 
 
 def _short(value: str, max_length: int) -> str:

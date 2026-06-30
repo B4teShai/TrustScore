@@ -1,9 +1,11 @@
 export type RiskLevel = "Low Risk" | "Medium Risk" | "High Risk";
+export type TargetMarket = "auto" | "US" | "JP" | "EU" | "UK";
 
 export type ProductAnalysisPayload = {
   url: string;
   browser_id?: string;
   locale?: string;
+  target_market?: TargetMarket;
 };
 
 export type SellerInfo = {
@@ -41,6 +43,7 @@ export type ExtractedProductAnalysisPayload = {
   product: ExtractedProductPayload;
   browser_id?: string;
   locale?: string;
+  target_market?: TargetMarket;
 };
 
 export type ProductMetadata = {

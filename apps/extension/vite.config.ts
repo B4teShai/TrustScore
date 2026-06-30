@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
@@ -13,6 +13,7 @@ function copyManifest(): Plugin {
     closeBundle() {
       mkdirSync(distDir, { recursive: true });
       copyFileSync(resolve(rootDir, "manifest.json"), resolve(distDir, "manifest.json"));
+      cpSync(resolve(rootDir, "public/icons"), resolve(distDir, "icons"), { recursive: true });
     },
   };
 }

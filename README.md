@@ -42,7 +42,7 @@ Starts Postgres, the API (on the **best** model set, persisting to Postgres), th
 dev server, and a trainer step that assembles `ml/artifacts/best/`.
 
 ```bash
-cp .env.docker.example .env     # optional: paste ANTHROPIC_API_KEY for Claude feedback
+cp .env.docker.example .env     # optional: paste ANTHROPIC_API_KEY and SERPER_API_KEY
 docker compose up --build
 ```
 
@@ -51,6 +51,9 @@ docker compose up --build
 | API | http://localhost:8000 | `/health`, `/api/v1/model-info` |
 | Extension (Vite) | http://localhost:5173 | dev server with hot reload |
 | Postgres | localhost:5432 | db `trustscore`, `postgres` / `postgres`, migrations auto-applied |
+
+Set `SERPER_API_KEY` in `.env` to enable backend-only market reference lookups.
+After changing backend code or env settings, rebuild the API image with `docker compose up --build`.
 
 To use the extension **in Chrome**, build `dist/` and load it unpacked (see step 2 below);
 Chrome can't run inside the container. Run real training on demand:
@@ -122,10 +125,11 @@ is identical either way; only the wording of the recommendation changes.
 `content-language`, or `og:locale`) and sends it as `locale` — primary targets are
 **Japanese (`ja`) and English (`en`)**. With a key set, Claude writes the recommendation
 **and** translates the reasons into that language in one call; the response echoes `language`.
-Prices are shown in the page's own detected currency (no conversion), with correct formatting
-per currency — e.g. **yen** (`¥`/`円`/`JPY`) renders as `￥2,980` (no decimals), USD as
-`$29.99`. Without a key, guidance/reasons stay English. (Static popup labels like "Top reasons"
-remain English for now.)
+Prices are shown in the page's own detected currency, with correct formatting per currency —
+e.g. **yen** (`¥`/`円`/`JPY`) renders as `￥2,980` (no decimals), USD as `$29.99`. Market
+references stay same-currency when Serper returns matching listings; otherwise the backend can
+convert supported Serper prices with a server-side exchange-rate lookup before scoring. Without a
+key, guidance/reasons stay English. (Static popup labels like "Top reasons" remain English for now.)
 
 ### Saving scored pages
 

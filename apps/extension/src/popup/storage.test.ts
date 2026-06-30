@@ -4,6 +4,8 @@ import {
   canonicalProductPageUrl,
   getOrCreateBrowserId,
   getStoredResultForPage,
+  normalizeProductPreview,
+  productPayloadFromPreview,
   safeImageUrl,
   storeLastResult,
 } from "./App";
@@ -95,6 +97,116 @@ describe("popup storage helpers", () => {
         "https://www.amazon.co.jp/dp/B0DZC1K3B7?ref=abc&fbclid=very-long",
       ),
     ).toBe("https://www.amazon.co.jp/dp/B0DZC1K3B7");
+  });
+
+  it("normalizes active-tab marketplace previews into extracted scan payloads", () => {
+    const preview = normalizeProductPreview({
+      title: "Soccer Ball Engraved Glasses",
+      imageUrl: "https://i.etsystatic.com/123/listing.jpg",
+      seller: "GoalGiftShop",
+      sellerRating: 4.9,
+      sellerReviewCount: 1284,
+      price: 24.5,
+      currency: "usd",
+      rating: 4.8,
+      reviewCount: 312,
+      returnPolicy: "Returns accepted within 30 days.",
+      reviews: [
+        {
+          text: "Brief content visible, double tap to read full content. Great engraving quality. Read more Read less",
+          rating: 5,
+        },
+      ],
+    });
+
+    expect(preview?.currency).toBe("USD");
+    expect(preview?.reviews?.[0]?.text).toBe("Great engraving quality.");
+
+    const payload = productPayloadFromPreview({
+      host: "www.etsy.com",
+      preview: preview ?? undefined,
+      targetMarket: "US",
+      url: "https://www.etsy.com/listing/1566610967/soccer-ball-engraved-glasses",
+    });
+
+    expect(payload).toMatchObject({
+      currency: "USD",
+      price: 24.5,
+      product_title: "Soccer Ball Engraved Glasses",
+      review_count: 312,
+      seller: { name: "GoalGiftShop", rating: 4.9, review_count: 1284 },
+      site: "www.etsy.com",
+    });
+  });
+
+  it("drops localized marketplace preview prices outside the target market", () => {
+    const preview = normalizeProductPreview({
+      title: "Natural Burlap Placemats",
+      price: 164690.19,
+      currency: "MNT",
+    });
+
+    const payload = productPayloadFromPreview({
+      host: "www.amazon.com",
+      preview: preview ?? undefined,
+      targetMarket: "US",
+      url: "https://www.amazon.com/dp/B0GXVNG3TR",
+    });
+
+    expect(payload).toMatchObject({
+      product_title: "Natural Burlap Placemats",
+      site: "www.amazon.com",
+    });
+    expect(payload?.price).toBeUndefined();
+    expect(payload?.currency).toBeUndefined();
+  });
+
+  it("keeps same-market JPY marketplace preview prices", () => {
+    const preview = normalizeProductPreview({
+      title: "Japanese Snack Box",
+      price: 2659,
+      currency: "JPY",
+    });
+
+    const payload = productPayloadFromPreview({
+      host: "www.amazon.co.jp",
+      preview: preview ?? undefined,
+      targetMarket: "JP",
+      url: "https://www.amazon.co.jp/dp/B0TESTJP12",
+    });
+
+    expect(payload).toMatchObject({
+      currency: "JPY",
+      price: 2659,
+      product_title: "Japanese Snack Box",
+      site: "www.amazon.co.jp",
+    });
+  });
+
+  it("keeps supported JPY preview prices on Amazon US pages", () => {
+    const preview = normalizeProductPreview({
+      title: "Straight Leg Jeans for Women",
+      seller: "Mars power",
+      price: 5682,
+      currency: "JPY",
+      reviewCount: 1037,
+    });
+
+    const payload = productPayloadFromPreview({
+      host: "www.amazon.com",
+      preview: preview ?? undefined,
+      targetMarket: "US",
+      url: "https://www.amazon.com/dp/B0TESTUSJP",
+    });
+
+    expect(payload).toMatchObject({
+      currency: "JPY",
+      price: 5682,
+      product_title: "Straight Leg Jeans for Women",
+      review_count: 1037,
+      seller: { name: "Mars power" },
+      site: "www.amazon.com",
+    });
   });
 });
 

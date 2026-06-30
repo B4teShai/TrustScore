@@ -16,6 +16,7 @@ MAX_RESPONSE_BYTES = 2_000_000
 MAX_REDIRECTS = 4
 REQUEST_TIMEOUT_SECONDS = 8.0
 RENDERED_PRODUCT_SELECTORS = (
+    # Amazon product detail surface
     "#productTitle",
     "[data-feature-name='title']",
     "#landingImage",
@@ -38,6 +39,36 @@ RENDERED_PRODUCT_SELECTORS = (
     "[data-hook='review']",
     "[data-hook='reviewText']",
     "[id^='social-proofing']",
+    # eBay product detail surface
+    "h1.x-item-title__mainTitle",
+    "[data-testid='x-item-title']",
+    "img#icImg",
+    "[data-testid='ux-image-carousel-item']",
+    ".x-price-primary",
+    ".x-price-approx",
+    "[data-testid='x-price-primary']",
+    "[data-testid='x-sellercard-atf__info']",
+    ".x-sellercard-atf__info__about-seller",
+    "[data-testid='x-sellercard-atf__data-item']",
+    "[data-testid='ux-seller-section__item']",
+    "[data-testid='x-returns-minview']",
+    "[data-testid='ux-labels-values-Returns']",
+    "[data-review-region]",
+    "[data-review-text]",
+    # Etsy listing detail surface
+    "h1[data-buy-box-listing-title]",
+    "[data-buy-box-region='title']",
+    "[data-carousel]",
+    ".listing-page-image-carousel-component",
+    "[data-listing-page-image]",
+    "[data-buy-box-region='price']",
+    "[data-buy-box-region='shop-name']",
+    "[data-region='shop-name']",
+    "[data-region='shop-rating']",
+    "[data-region='listing-page-description']",
+    "[data-id='description-text']",
+    "[data-region='listing-page-policies']",
+    "[data-region='return-policy']",
     "h1",
     "button",
 )

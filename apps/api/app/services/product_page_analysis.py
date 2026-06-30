@@ -13,6 +13,7 @@ from app.page_fetching.fetcher import (
     render_public_html,
 )
 from app.schemas.product_analysis import ProductPageData
+from app.services.market_reference import enrich_market_reference
 
 
 class ProductNotDetectedError(RuntimeError):
@@ -28,7 +29,12 @@ class ProductPageAnalysis:
     signals: list[str]
 
 
-def analyze_product_url(url: str) -> ProductPageAnalysis:
+def analyze_product_url(
+    url: str,
+    *,
+    target_market: str | None = "auto",
+    locale: str | None = None,
+) -> ProductPageAnalysis:
     """Fetch, optionally render, and extract product-page data."""
     static_error: PageFetchError | None = None
     static_result_reason = "This page does not have enough product-detail signals."
@@ -41,13 +47,23 @@ def analyze_product_url(url: str) -> ProductPageAnalysis:
         static_error = exc
     else:
         render_url = static_page.final_url
-        static_result = extract_product_page(static_page.html, static_page.final_url)
+        static_result = extract_product_page(
+            static_page.html,
+            static_page.final_url,
+            target_market=target_market,
+            locale=locale,
+        )
         static_result_reason = static_result.reason
         if static_result.detected and static_result.product is not None:
+            product, market_signals = enrich_market_reference(
+                static_result.product,
+                target_market=target_market,
+                locale=locale,
+            )
             return ProductPageAnalysis(
-                product=static_result.product,
+                product=product,
                 fetch_mode=static_page.mode,
-                signals=static_result.signals,
+                signals=[*static_result.signals, *market_signals],
             )
 
     rendered_page = None
@@ -61,12 +77,22 @@ def analyze_product_url(url: str) -> ProductPageAnalysis:
                 ) from exc
 
     if rendered_page is not None:
-        rendered_result = extract_product_page(rendered_page.html, rendered_page.final_url)
+        rendered_result = extract_product_page(
+            rendered_page.html,
+            rendered_page.final_url,
+            target_market=target_market,
+            locale=locale,
+        )
         if rendered_result.detected and rendered_result.product is not None:
+            product, market_signals = enrich_market_reference(
+                rendered_result.product,
+                target_market=target_market,
+                locale=locale,
+            )
             return ProductPageAnalysis(
-                product=rendered_result.product,
+                product=product,
                 fetch_mode=rendered_page.mode,
-                signals=rendered_result.signals,
+                signals=[*rendered_result.signals, *market_signals],
             )
 
     if static_error is not None:

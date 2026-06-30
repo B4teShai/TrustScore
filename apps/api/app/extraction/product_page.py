@@ -12,15 +12,62 @@ from urllib.parse import urljoin, urlparse, urlunparse
 from bs4 import BeautifulSoup
 
 from app.schemas.product_analysis import ProductPageData, ReviewInput, SellerInfo
+from app.services.market_context import (
+    expected_currency_for_market,
+    normalize_currency_code,
+    resolve_target_market,
+    should_use_price_currency,
+)
 
 
-PRICE_RE = re.compile(r"(\$|USD|MNT|₮|€|£)\s?([0-9][0-9,.]*)", re.I)
+PRICE_RE = re.compile(
+    r"(US\s*\$|C\$|A\$|\$|USD|MNT|₮|€|EUR|£|GBP|¥|￥|円|JPY)\s?([0-9][0-9,.]*)",
+    re.I,
+)
+PRICE_SUFFIX_RE = re.compile(
+    r"([0-9][0-9,.]*)\s?(USD|MNT|EUR|GBP|JPY|円|CAD|AUD)",
+    re.I,
+)
 RATING_RE = re.compile(r"([0-5](?:\.[0-9])?)\s*(?:out of 5|stars?)", re.I)
 REVIEW_COUNT_RE = re.compile(r"([0-9][0-9,]*)\s+(?:ratings?|reviews?)", re.I)
-POLICY_RE = re.compile(r"(.{0,80}(?:return|refund|exchange|warranty).{0,160})", re.I)
+POLICY_RE = re.compile(r"(.{0,120}(?:return|refund|exchange|warranty).{0,220})", re.I)
 PRODUCT_URL_RE = re.compile(r"/(dp|gp/product|product|products|item|itm)/", re.I)
 BOUGHT_RECENT_RE = re.compile(
     r"([0-9][0-9.,]*)\s*([KkMm])?\+?\s+bought\s+in\s+past\s+month", re.I
+)
+POLICY_ACCEPT_RE = re.compile(
+    r"\b("
+    r"return\s+policy|returns\s+policy|refund(?:s|ed|able)?|exchange|warranty|"
+    r"replacement|returnable|eligible\s+for\s+returns?|free\s+returns?|return\s+window|"
+    r"within\s+\d+\s*-?\s*(?:day|days|week|weeks|month|months)"
+    r")\b",
+    re.I,
+)
+POLICY_TIME_RE = re.compile(
+    r"("
+    r"\b\d+\s*-?\s*(?:day|days|week|weeks|month|months)\b.{0,80}\breturns?\b|"
+    r"\breturns?\b.{0,80}\b\d+\s*-?\s*(?:day|days|week|weeks|month|months)\b"
+    r")",
+    re.I,
+)
+POLICY_NAV_NOISE_RE = re.compile(
+    r"\b(returns\s*&\s*orders|account\s*&\s*lists|hello,\s*sign in|today'?s deals|"
+    r"prime video|gift cards|customer service|all\s+today'?s deals|cart\s+all)\b",
+    re.I,
+)
+POLICY_START_RE = re.compile(
+    r"\b(this item|item|eligible|free returns?|returns?|return policy|returns policy|refund|"
+    r"exchange|warranty|replacement|returnable)\b",
+    re.I,
+)
+REVIEW_BOILERPLATE_RE = re.compile(
+    r"("
+    r"brief content visible,\s*double tap to read full content\.?|"
+    r"full content visible,\s*double tap to read brief content\.?|"
+    r"read more\s+read less|"
+    r"the media could not be loaded\.?"
+    r")",
+    re.I,
 )
 
 
@@ -34,12 +81,309 @@ class ExtractionResult:
     signals: list[str] = field(default_factory=list)
 
 
-def extract_product_page(html: str, url: str) -> ExtractionResult:
+@dataclass(frozen=True)
+class MarketplaceProfile:
+    """Prioritized selectors for marketplace layouts when HTML is available."""
+
+    site_signal: str | None = None
+    title_selectors: tuple[str, ...] = ()
+    image_selectors: tuple[str, ...] = ()
+    price_selectors: tuple[str, ...] = ()
+    seller_selectors: tuple[str, ...] = ()
+    seller_reputation_selectors: tuple[str, ...] = ()
+    rating_selectors: tuple[str, ...] = ()
+    review_count_selectors: tuple[str, ...] = ()
+    description_selectors: tuple[str, ...] = ()
+    policy_selectors: tuple[str, ...] = ()
+    review_card_selectors: tuple[str, ...] = ()
+    review_body_selectors: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PriceExtraction:
+    price: float | None
+    currency: str | None
+    ignored_currency: str | None = None
+
+
+GENERIC_PROFILE = MarketplaceProfile(
+    title_selectors=(
+        "#productTitle",
+        "[data-testid='product-title']",
+        "[itemprop='name']",
+        "h1",
+        "meta[property='og:title']",
+        "meta[name='twitter:title']",
+        "title",
+    ),
+    image_selectors=(
+        "meta[property='og:image']",
+        "meta[name='twitter:image']",
+        "[itemprop='image']",
+        "img",
+    ),
+    price_selectors=(
+        "meta[property='product:price:amount']",
+        "[itemprop='price']",
+        "[data-testid*='price']",
+        "[class*='price']",
+        "[id*='price']",
+    ),
+    seller_selectors=(
+        "[data-testid*='seller']",
+        "[class*='seller']",
+        "[id*='seller']",
+        "[class*='merchant']",
+        "[id*='merchant']",
+        "[itemprop='seller']",
+        "[itemprop='brand']",
+    ),
+    rating_selectors=(
+        "[itemprop='ratingValue']",
+        "[aria-label*='out of 5']",
+        "[aria-label*='stars']",
+    ),
+    review_count_selectors=(
+        "[itemprop='reviewCount']",
+        "[data-testid*='review-count']",
+        "[aria-label*='review']",
+    ),
+    description_selectors=(
+        "meta[name='description']",
+        "meta[property='og:description']",
+        "[itemprop='description']",
+        "#productDescription",
+        "[data-testid*='description']",
+    ),
+    policy_selectors=(
+        "[data-testid*='return']",
+        "[data-testid*='policy']",
+        "[class*='return-policy']",
+        "[id*='return-policy']",
+        "[class*='returns-policy']",
+        "[id*='returns-policy']",
+    ),
+    review_card_selectors=(
+        "[itemprop='review']",
+        "[data-testid*='review']",
+        ".review",
+    ),
+    review_body_selectors=(
+        "[itemprop='reviewBody']",
+        "[data-review-text]",
+        "p",
+    ),
+)
+
+
+AMAZON_PROFILE = MarketplaceProfile(
+    site_signal="site_amazon",
+    title_selectors=(
+        "#productTitle",
+        "[data-feature-name='title'] h1",
+        "meta[property='og:title']",
+        "h1",
+    ),
+    image_selectors=(
+        "#landingImage",
+        "#imgTagWrapperId img",
+        "meta[property='og:image']",
+    ),
+    price_selectors=(
+        "#corePrice_feature_div .a-price .a-offscreen",
+        "#corePrice_feature_div .a-price",
+        "#priceblock_ourprice",
+        "#priceblock_dealprice",
+        "#price_inside_buybox",
+        ".a-price .a-offscreen",
+        ".a-price",
+        "meta[property='product:price:amount']",
+    ),
+    seller_selectors=(
+        "#sellerProfileTriggerId",
+        "[tabular-attribute-name='Sold by'] .tabular-buybox-text",
+        "#merchant-info",
+        "#bylineInfo",
+    ),
+    rating_selectors=("#acrPopover", "#averageCustomerReviews .a-icon-alt"),
+    review_count_selectors=("#acrCustomerReviewText", "[data-hook='total-review-count']"),
+    description_selectors=(
+        "#feature-bullets",
+        "#productDescription",
+        "#bookDescription_feature_div",
+        "meta[name='description']",
+    ),
+    policy_selectors=(
+        "#productSupportAndReturnPolicy-secondary-content",
+        "#productSupportAndReturnPolicy_feature_div",
+        "#RETURNS_POLICY_feature_div",
+        "#dp-returns-policy_feature_div",
+        "[data-hook='returns-policy']",
+        "#returns-policy-anchor-text",
+        "[id*='RETURNS_POLICY']",
+    ),
+    review_card_selectors=(
+        "[data-hook='review']",
+        "[data-hook='cmps-review']",
+        "div[id^='customer_review-']",
+        "div[id^='customer_review_foreign-']",
+    ),
+    review_body_selectors=(
+        "[data-hook='reviewText']",
+        "[data-hook='reviewTextContainer']",
+        "[data-hook='review-body']",
+        "[data-hook='review-collapsed']",
+        ".review-text-content",
+        ".cr-original-review-text",
+    ),
+)
+
+
+EBAY_PROFILE = MarketplaceProfile(
+    site_signal="site_ebay",
+    title_selectors=(
+        "h1.x-item-title__mainTitle span",
+        "[data-testid='x-item-title'] h1",
+        "[data-testid='x-item-title']",
+        "h1 span.ux-textspans",
+        "meta[property='og:title']",
+        "h1",
+    ),
+    image_selectors=(
+        "img#icImg",
+        "[data-testid='ux-image-carousel-item'] img",
+        ".ux-image-carousel-item img",
+        ".ux-image-carousel img",
+        "meta[property='og:image']",
+    ),
+    price_selectors=(
+        "[data-testid='x-price-primary'] span",
+        ".x-price-primary span",
+        ".x-price-approx span",
+        "[itemprop='price']",
+        "meta[property='product:price:amount']",
+    ),
+    seller_selectors=(
+        "[data-testid='x-sellercard-atf__info'] a",
+        ".x-sellercard-atf__info__about-seller a",
+        "[data-testid='ux-seller-section__item'] a",
+        "[class*='seller'] a",
+    ),
+    seller_reputation_selectors=(
+        "[data-testid='x-sellercard-atf__data-item']",
+        ".x-sellercard-atf__data-item",
+        "[data-testid='ux-seller-section__item']",
+    ),
+    rating_selectors=("[data-testid*='rating']", "[aria-label*='out of 5 stars']"),
+    review_count_selectors=(
+        "[data-testid*='review-count']",
+        "[aria-label*='review']",
+        ".reviews",
+    ),
+    description_selectors=(
+        "[data-testid='ux-layout-section__item']",
+        "#viTabs_0_is",
+        "meta[name='description']",
+    ),
+    policy_selectors=(
+        "[data-testid='x-returns-minview']",
+        "[data-testid='ux-labels-values-Returns']",
+        "[data-testid='returns-policy']",
+        "[id*='return-policy']",
+        "[class*='return-policy']",
+    ),
+    review_card_selectors=(
+        "[data-review-region]",
+        "[data-review-text]",
+        "[data-testid*='review']",
+        ".review",
+    ),
+    review_body_selectors=("[data-review-text]", ".review-item-content", "p"),
+)
+
+
+ETSY_PROFILE = MarketplaceProfile(
+    site_signal="site_etsy",
+    title_selectors=(
+        "h1[data-buy-box-listing-title]",
+        "[data-buy-box-region='title'] h1",
+        "h1.wt-text-body-01",
+        "meta[property='og:title']",
+        "h1",
+    ),
+    image_selectors=(
+        "[data-carousel] img",
+        ".listing-page-image-carousel-component img",
+        "[data-listing-page-image] img",
+        "meta[property='og:image']",
+    ),
+    price_selectors=(
+        "[data-buy-box-region='price']",
+        "p[data-buy-box-region='price']",
+        "[data-selector='price-only']",
+        "meta[property='product:price:amount']",
+    ),
+    seller_selectors=(
+        "a[data-buy-box-region='shop-name']",
+        "[data-buy-box-region='shop-name'] a",
+        "a[data-region='shop-name']",
+        "[data-region='shop-name'] a",
+        "a[href*='/shop/'][data-region]",
+        ".shop-name a",
+        "a[href*='/shop/']",
+    ),
+    seller_reputation_selectors=(
+        "[data-region='shop-rating']",
+        "[aria-label*='shop reviews']",
+        "a[href*='reviews']",
+    ),
+    rating_selectors=(
+        "[data-review-star-rating]",
+        "[aria-label*='out of 5 stars']",
+        "[aria-label*='stars']",
+    ),
+    review_count_selectors=(
+        "[data-reviews-total-count]",
+        "a[href*='reviews']",
+        "button[aria-label*='review']",
+    ),
+    description_selectors=(
+        "[data-region='listing-page-description']",
+        "[data-id='description-text']",
+        "meta[name='description']",
+    ),
+    policy_selectors=(
+        "[data-policies-return-policy]",
+        "[data-region='listing-page-policies']",
+        "[data-region='return-policy']",
+        "[id*='return-policy']",
+        "[class*='return-policy']",
+    ),
+    review_card_selectors=(
+        "[data-review-region]",
+        "[data-review-text]",
+        "[data-testid*='review']",
+        ".review",
+    ),
+    review_body_selectors=("[data-review-text]", "p"),
+)
+
+
+def extract_product_page(
+    html: str,
+    url: str,
+    *,
+    target_market: str | None = "auto",
+    locale: str | None = None,
+) -> ExtractionResult:
     """Extract one product-page payload from HTML."""
     soup = BeautifulSoup(html, "html.parser")
     page_text = soup.get_text(" ", strip=True)
+    profile = _profile_for_url(url)
+    resolved_market = resolve_target_market(target_market, url=url, locale=locale)
+    expected_currency = expected_currency_for_market(resolved_market)
     product_objects = _json_ld_products(soup)
-    title = _clean_title(_first_product_value(product_objects, "name") or _find_title(soup))
+    title = _clean_title(_first_product_value(product_objects, "name") or _find_title(soup, profile))
     site = urlparse(url).hostname
 
     if not title:
@@ -49,26 +393,35 @@ def extract_product_page(html: str, url: str) -> ExtractionResult:
             reason="No clear product title was found.",
         )
 
-    price, currency = _extract_price_and_currency(soup, page_text, product_objects)
-    seller_name = _extract_seller(soup, page_text, product_objects)
-    reviews = _extract_reviews(soup, product_objects)
+    price_result = _extract_price_and_currency(
+        soup,
+        page_text,
+        product_objects,
+        profile,
+        expected_currency=expected_currency,
+        url=url,
+    )
+    seller = _extract_seller(soup, page_text, product_objects, profile)
+    reviews = _extract_reviews(soup, product_objects, profile)
     product = ProductPageData(
         url=url,
         site=site,
         product_title=title,
-        description=_extract_description(soup, product_objects),
-        product_image_url=_extract_image(soup, url, product_objects),
-        price=price,
-        currency=currency,
+        description=_extract_description(soup, product_objects, profile),
+        product_image_url=_extract_image(soup, url, product_objects, profile),
+        price=price_result.price,
+        currency=price_result.currency,
         average_market_price=None,
-        seller=SellerInfo(name=seller_name) if seller_name else None,
-        return_policy=_extract_policy(page_text),
+        seller=seller,
+        return_policy=_extract_policy(soup, page_text, profile),
         reviews=reviews,
-        rating=_extract_rating(soup, page_text, product_objects),
-        review_count=_extract_review_count(soup, page_text, product_objects),
+        rating=_extract_rating(soup, page_text, product_objects, profile),
+        review_count=_extract_review_count(soup, page_text, product_objects, profile),
         units_bought_recent=_extract_units_bought_recent(page_text),
     )
     signals = _product_signals(product, page_text, bool(product_objects), url)
+    if price_result.ignored_currency:
+        signals.append(f"price_ignored_localized_currency:{price_result.ignored_currency}")
     detected = _is_product_detail(signals)
     return ExtractionResult(
         detected=detected,
@@ -116,21 +469,19 @@ def _first_product_value(products: list[dict[str, Any]], key: str) -> str | None
     return None
 
 
-def _find_title(soup: BeautifulSoup) -> str | None:
-    selectors = [
-        "#productTitle",
-        "[data-testid='product-title']",
-        "[itemprop='name']",
-        "h1",
-        "meta[property='og:title']",
-        "meta[name='twitter:title']",
-        "title",
-    ]
-    for selector in selectors:
-        value = _element_text(soup.select_one(selector))
-        if value:
-            return value
-    return None
+def _profile_for_url(url: str) -> MarketplaceProfile:
+    host = (urlparse(url).hostname or "").lower()
+    if "amazon." in host:
+        return AMAZON_PROFILE
+    if host.endswith("ebay.com") or ".ebay." in host:
+        return EBAY_PROFILE
+    if host.endswith("etsy.com") or ".etsy." in host:
+        return ETSY_PROFILE
+    return GENERIC_PROFILE
+
+
+def _find_title(soup: BeautifulSoup, profile: MarketplaceProfile) -> str | None:
+    return _first_selector_text(soup, (*profile.title_selectors, *GENERIC_PROFILE.title_selectors))
 
 
 def _clean_title(value: str | None) -> str | None:
@@ -140,34 +491,36 @@ def _clean_title(value: str | None) -> str | None:
     cleaned = re.sub(r"\s+[-|]\s+Amazon(?:\.com)?$", "", cleaned, flags=re.I)
     if len(cleaned) < 4:
         return None
-    return cleaned[:180]
+    return _truncate_at_word(cleaned, 240)
 
 
-def _extract_description(soup: BeautifulSoup, products: list[dict[str, Any]]) -> str | None:
+def _extract_description(
+    soup: BeautifulSoup,
+    products: list[dict[str, Any]],
+    profile: MarketplaceProfile,
+) -> str | None:
     value = _first_product_value(products, "description")
     if value:
         return _compact(value)[:500]
-    return _compact(_element_text(soup.select_one("meta[name='description']")) or "")[:500] or None
+    for selector in (*profile.description_selectors, *GENERIC_PROFILE.description_selectors):
+        value = _element_text(soup.select_one(selector))
+        if value:
+            return _compact(value)[:500]
+    return None
 
 
 def _extract_image(
     soup: BeautifulSoup,
     page_url: str,
     products: list[dict[str, Any]],
+    profile: MarketplaceProfile,
 ) -> str | None:
     for product in products:
         image_url = _image_from_unknown(product.get("image"), page_url)
         if image_url:
             return image_url
 
-    selectors = [
-        "meta[property='og:image']",
-        "meta[name='twitter:image']",
-        "#landingImage",
-        "[itemprop='image']",
-        "img",
-    ]
-    for selector in selectors:
+    for selector in (*profile.image_selectors, *GENERIC_PROFILE.image_selectors):
         element = soup.select_one(selector)
         image_url = _image_from_element(element, page_url)
         if image_url:
@@ -179,34 +532,43 @@ def _extract_price_and_currency(
     soup: BeautifulSoup,
     page_text: str,
     products: list[dict[str, Any]],
-) -> tuple[float | None, str | None]:
+    profile: MarketplaceProfile,
+    *,
+    expected_currency: str,
+    url: str,
+) -> PriceExtraction:
+    candidates: list[tuple[float, str | None]] = []
+
     for product in products:
         for offer in _as_list(product.get("offers")):
             if not isinstance(offer, dict):
                 continue
             price = _parse_float(offer.get("price"))
             if price is not None:
-                currency = _string_from_unknown(offer.get("priceCurrency"))
-                return price, currency
+                currency = normalize_currency_code(_string_from_unknown(offer.get("priceCurrency")))
+                candidates.append((price, currency))
 
-    meta_price = _element_text(soup.select_one("meta[property='product:price:amount']"))
-    parsed_meta_price = _parse_float(meta_price)
-    if parsed_meta_price is not None:
-        currency = _element_text(soup.select_one("meta[property='product:price:currency']"))
-        return parsed_meta_price, currency
+    page_currency = normalize_currency_code(
+        _element_text(soup.select_one("meta[property='product:price:currency']"))
+    )
+    for selector in (*profile.price_selectors, *GENERIC_PROFILE.price_selectors):
+        value = _element_text(soup.select_one(selector))
+        price, parsed_currency = _parse_price_text(value, allow_without_currency=True)
+        if price is not None:
+            candidates.append((price, parsed_currency or page_currency))
 
-    match = PRICE_RE.search(page_text)
-    if not match:
-        return None, None
-    price = _parse_float(match.group(2))
-    currency = match.group(1).upper()
-    return price, currency
+    price, parsed_currency = _parse_price_text(page_text, allow_without_currency=False)
+    if price is not None:
+        candidates.append((price, parsed_currency))
+
+    return _select_price_candidate(candidates, expected_currency=expected_currency, url=url)
 
 
 def _extract_rating(
     soup: BeautifulSoup,
     page_text: str,
     products: list[dict[str, Any]],
+    profile: MarketplaceProfile,
 ) -> float | None:
     for product in products:
         aggregate = product.get("aggregateRating")
@@ -215,9 +577,10 @@ def _extract_rating(
             if rating is not None and 0 <= rating <= 5:
                 return rating
 
-    rating = _parse_float(_element_text(soup.select_one("[itemprop='ratingValue']")))
-    if rating is not None and 0 <= rating <= 5:
-        return rating
+    for selector in (*profile.rating_selectors, *GENERIC_PROFILE.rating_selectors):
+        rating = _parse_rating_text(_element_text(soup.select_one(selector)))
+        if rating is not None:
+            return rating
 
     match = RATING_RE.search(page_text)
     if not match:
@@ -230,6 +593,7 @@ def _extract_review_count(
     soup: BeautifulSoup,
     page_text: str,
     products: list[dict[str, Any]],
+    profile: MarketplaceProfile,
 ) -> int | None:
     for product in products:
         aggregate = product.get("aggregateRating")
@@ -238,9 +602,16 @@ def _extract_review_count(
             if count is not None:
                 return count
 
-    count = _parse_int(_element_text(soup.select_one("[itemprop='reviewCount']")))
-    if count is not None:
-        return count
+    for selector in (*profile.review_count_selectors, *GENERIC_PROFILE.review_count_selectors):
+        element = soup.select_one(selector)
+        count = _parse_int(_element_text(element))
+        if count is None and element is not None:
+            for attribute in ("content", "data-reviews-total-count", "aria-label"):
+                count = _parse_int(element.get(attribute))
+                if count is not None:
+                    break
+        if count is not None:
+            return count
 
     match = REVIEW_COUNT_RE.search(page_text)
     return _parse_int(match.group(1)) if match else None
@@ -250,46 +621,132 @@ def _extract_seller(
     soup: BeautifulSoup,
     page_text: str,
     products: list[dict[str, Any]],
-) -> str | None:
+    profile: MarketplaceProfile,
+) -> SellerInfo | None:
+    name: str | None = None
     for product in products:
         seller = _seller_from_unknown(product.get("seller") or product.get("brand"))
         if seller:
-            return seller
+            name = seller
+            break
         for offer in _as_list(product.get("offers")):
             seller = _seller_from_unknown(offer.get("seller") if isinstance(offer, dict) else None)
             if seller:
-                return seller
+                name = seller
+                break
+        if name:
+            break
 
-    selectors = [
-        "#sellerProfileTriggerId",
-        "#merchant-info",
-        "#bylineInfo",
-        "[data-testid*='seller']",
-        "[class*='seller']",
-        "[id*='seller']",
-        "[class*='merchant']",
-        "[id*='merchant']",
-    ]
-    for selector in selectors:
-        seller = _clean_seller(_element_text(soup.select_one(selector)))
-        if seller:
-            return seller
-    return _clean_seller(page_text)
+    if not name:
+        for selector in (*profile.seller_selectors, *GENERIC_PROFILE.seller_selectors):
+            seller = _clean_seller(_element_text(soup.select_one(selector)))
+            if seller:
+                name = seller
+                break
+    if not name:
+        name = _clean_seller(page_text)
+
+    reputation_text = " ".join(
+        _selector_texts(
+            soup,
+            (*profile.seller_reputation_selectors, *GENERIC_PROFILE.seller_selectors),
+            limit=8,
+        )
+    )
+    seller_rating, seller_review_count = _extract_seller_reputation(reputation_text)
+    if not name and seller_rating is None and seller_review_count is None:
+        return None
+    return SellerInfo(name=name, rating=seller_rating, review_count=seller_review_count)
 
 
-def _extract_policy(page_text: str) -> str | None:
+def _extract_policy(
+    soup: BeautifulSoup,
+    page_text: str,
+    profile: MarketplaceProfile,
+) -> str | None:
+    for selector in (*profile.policy_selectors, *GENERIC_PROFILE.policy_selectors):
+        policy = clean_policy_snippet(_element_text(soup.select_one(selector)))
+        if policy:
+            return policy
+
     match = POLICY_RE.search(page_text)
-    return _compact(match.group(1)) if match else None
+    if not match:
+        return None
+    for match in POLICY_RE.finditer(page_text):
+        policy = clean_policy_snippet(match.group(1))
+        if policy:
+            return policy
+    return None
 
 
-def _extract_reviews(soup: BeautifulSoup, products: list[dict[str, Any]]) -> list[ReviewInput]:
+def clean_policy_snippet(value: str | None) -> str | None:
+    """Return a compact policy snippet only when it contains real policy terms."""
+    if not value:
+        return None
+    compact = _compact(value)
+    if not compact:
+        return None
+    if not (POLICY_ACCEPT_RE.search(compact) or POLICY_TIME_RE.search(compact)):
+        return None
+    compact = _focus_policy_snippet(compact)
+    if POLICY_NAV_NOISE_RE.search(compact) and not _has_strong_policy_detail(compact):
+        return None
+    return compact[:1000]
+
+
+def _focus_policy_snippet(value: str) -> str:
+    anchor = POLICY_TIME_RE.search(value) or POLICY_ACCEPT_RE.search(value)
+    if not anchor:
+        return value
+    context_start = max(0, anchor.start() - 120)
+    context_end = min(len(value), anchor.end() + 220)
+    context = value[context_start:context_end].strip()
+    start_matches = list(POLICY_START_RE.finditer(context[: max(anchor.end() - context_start, 0)]))
+    if start_matches and not re.match(r"^\d", context):
+        preferred = next(
+            (match for match in start_matches if match.group(1).lower() == "this item"),
+            start_matches[-1],
+        )
+        context = context[preferred.start() :].strip()
+    sentence_end = re.search(r"(?<=[.!?])\s+", context)
+    if sentence_end:
+        return context[: sentence_end.end()].strip()
+    return context
+
+
+def _has_strong_policy_detail(value: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(refund|exchange|warranty|replacement|returnable|eligible\s+for\s+returns?|"
+            r"free\s+returns?|return\s+policy|returns\s+policy)\b",
+            value,
+            flags=re.I,
+        )
+        or POLICY_TIME_RE.search(value)
+    )
+
+
+def clean_review_body(value: str | None) -> str | None:
+    """Remove marketplace UI boilerplate from visible review text."""
+    if not value:
+        return None
+    cleaned = REVIEW_BOILERPLATE_RE.sub(" ", value)
+    cleaned = _compact(cleaned)
+    return cleaned or None
+
+
+def _extract_reviews(
+    soup: BeautifulSoup,
+    products: list[dict[str, Any]],
+    profile: MarketplaceProfile,
+) -> list[ReviewInput]:
     reviews: list[ReviewInput] = []
     seen: set[str] = set()
     for product in products:
         for raw_review in _as_list(product.get("review")):
             if not isinstance(raw_review, dict):
                 continue
-            text = _compact(
+            text = clean_review_body(
                 _string_from_unknown(raw_review.get("reviewBody") or raw_review.get("description")) or ""
             )
             if not text or text in seen:
@@ -303,12 +760,22 @@ def _extract_reviews(soup: BeautifulSoup, products: list[dict[str, Any]]) -> lis
             if len(reviews) >= 10:
                 return reviews
 
+    for card in _select_review_cards(soup, profile):
+        text = clean_review_body(_review_body_from_card(card, profile))
+        if not text or len(text) < 20 or text in seen:
+            continue
+        rating = _parse_rating_text(_element_text(card))
+        reviews.append(ReviewInput(text=text[:1000], rating=rating))
+        seen.add(text)
+        if len(reviews) >= 10:
+            return reviews
+
     # Current Amazon layout: each card is data-hook="review" with the body in
     # data-hook="reviewText". Prefer that precise body over the whole card text.
     for card in soup.select("[data-hook='review'], [data-hook='cmps-review']"):
         body = card.select_one("[data-hook='reviewText'], [data-hook='reviewTextContainer']")
-        text = _compact((body or card).get_text(" ", strip=True))
-        if len(text) < 20 or text in seen:
+        text = clean_review_body((body or card).get_text(" ", strip=True))
+        if not text or len(text) < 20 or text in seen:
             continue
         reviews.append(ReviewInput(text=text[:1000]))
         seen.add(text)
@@ -327,8 +794,8 @@ def _extract_reviews(soup: BeautifulSoup, products: list[dict[str, Any]]) -> lis
             if value
         )
     ):
-        text = _compact(element.get_text(" ", strip=True))
-        if len(text) < 20 or text in seen:
+        text = clean_review_body(element.get_text(" ", strip=True))
+        if not text or len(text) < 20 or text in seen:
             continue
         reviews.append(ReviewInput(text=text[:1000]))
         seen.add(text)
@@ -358,6 +825,9 @@ def _product_signals(
     signals: list[str] = []
     if has_structured_product:
         signals.append("structured_product")
+    site_signal = _site_signal(url)
+    if site_signal:
+        signals.append(site_signal)
     if product.product_title:
         signals.append("title")
     if product.price is not None:
@@ -372,6 +842,8 @@ def _product_signals(
         signals.append("image")
     if product.return_policy:
         signals.append("policy")
+    elif POLICY_NAV_NOISE_RE.search(page_text):
+        signals.append("policy_rejected_noisy_text")
     if re.search(r"\b(add to cart|add to bag|buy now|checkout|in stock)\b", page_text, re.I):
         signals.append("commerce_action")
     if PRODUCT_URL_RE.search(urlparse(url).path):
@@ -410,6 +882,17 @@ def _is_product_detail(signals: list[str]) -> bool:
     return score >= 6 and has("title") and commerce
 
 
+def _site_signal(url: str) -> str | None:
+    host = (urlparse(url).hostname or "").lower()
+    if "amazon." in host:
+        return "site_amazon"
+    if host.endswith("ebay.com") or ".ebay." in host:
+        return "site_ebay"
+    if host.endswith("etsy.com") or ".etsy." in host:
+        return "site_etsy"
+    return None
+
+
 def _element_text(element: Any) -> str | None:
     if element is None:
         return None
@@ -418,8 +901,74 @@ def _element_text(element: Any) -> str | None:
     return _compact(element.get_text(" ", strip=True))
 
 
+def _first_selector_text(soup: BeautifulSoup, selectors: tuple[str, ...]) -> str | None:
+    values = _selector_texts(soup, selectors, limit=1)
+    return values[0] if values else None
+
+
+def _selector_texts(
+    soup: BeautifulSoup,
+    selectors: tuple[str, ...],
+    *,
+    limit: int,
+) -> list[str]:
+    values: list[str] = []
+    seen_selectors: set[str] = set()
+    seen_values: set[str] = set()
+    seen: set[str] = set()
+    for selector in selectors:
+        if selector in seen_selectors:
+            continue
+        seen_selectors.add(selector)
+        for element in soup.select(selector):
+            marker = str(id(element))
+            if marker in seen:
+                continue
+            seen.add(marker)
+            value = _element_text(element)
+            if not value or value in seen_values:
+                continue
+            values.append(value)
+            seen_values.add(value)
+            if len(values) >= limit:
+                return values
+    return values
+
+
+def _select_review_cards(soup: BeautifulSoup, profile: MarketplaceProfile) -> list[Any]:
+    cards: list[Any] = []
+    seen: set[int] = set()
+    for selector in (*profile.review_card_selectors, *GENERIC_PROFILE.review_card_selectors):
+        for card in soup.select(selector):
+            marker = id(card)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            cards.append(card)
+    return cards
+
+
+def _review_body_from_card(card: Any, profile: MarketplaceProfile) -> str | None:
+    for selector in (*profile.review_body_selectors, *GENERIC_PROFILE.review_body_selectors):
+        body = card.select_one(selector)
+        if body is not None:
+            value = _element_text(body)
+            if value:
+                return value
+    return _element_text(card)
+
+
 def _compact(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
+
+
+def _truncate_at_word(value: str, max_length: int) -> str:
+    if len(value) <= max_length:
+        return value
+    boundary = value.rfind(" ", 0, max_length + 1)
+    if boundary < max_length * 0.65:
+        return value[:max_length].rstrip()
+    return value[:boundary].rstrip()
 
 
 def _absolute_http_url(value: str | None, base_url: str) -> str | None:
@@ -599,15 +1148,141 @@ def _clean_seller(value: str | None) -> str | None:
             cleaned = re.sub(r"[|•].*$", "", match.group(1)).strip()
             return cleaned if 2 <= len(cleaned) <= 80 else None
     cleaned = re.sub(r"^(Sold by|Seller:|Visit the)\s+", "", compact, flags=re.I)
+    cleaned = re.sub(r"^Shop\s+", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s+(?:on Etsy|\|\s*eBay)$", "", cleaned, flags=re.I)
     cleaned = re.sub(r"[|•].*$", "", cleaned).strip()
     return cleaned if 2 <= len(cleaned) <= 80 else None
+
+
+def _extract_seller_reputation(value: str | None) -> tuple[float | None, int | None]:
+    if not value:
+        return None, None
+    rating = _rating_from_percent(value) or _parse_rating_text(value)
+    review_count = None
+    match = re.search(
+        r"([0-9][0-9,]*)\s*(?:feedback|seller reviews?|shop reviews?|reviews?)",
+        value,
+        flags=re.I,
+    )
+    if match:
+        review_count = _parse_int(match.group(1))
+    return rating, review_count
+
+
+def _rating_from_percent(value: str | None) -> float | None:
+    if not value:
+        return None
+    match = re.search(r"([0-9]{1,3}(?:[.,][0-9]+)?)\s*%\s*(?:positive|feedback)?", value, flags=re.I)
+    if not match:
+        return None
+    percent = _parse_float(match.group(1))
+    if percent is None or percent > 100:
+        return None
+    return round(percent / 20, 1)
+
+
+def _parse_rating_text(value: str | None) -> float | None:
+    if not value:
+        return None
+    match = RATING_RE.search(value)
+    if match:
+        rating = _parse_float(match.group(1))
+        return rating if rating is not None and 0 <= rating <= 5 else None
+    number_match = re.search(r"([0-5](?:[.,][0-9])?)", value)
+    if not number_match:
+        return None
+    rating = _parse_float(number_match.group(1))
+    return rating if rating is not None and 0 <= rating <= 5 else None
+
+
+def _parse_price_text(
+    value: str | None,
+    *,
+    allow_without_currency: bool,
+) -> tuple[float | None, str | None]:
+    if not value:
+        return None, None
+    compact = _compact(value)
+    match = PRICE_RE.search(compact)
+    if match:
+        currency = _currency_from_token(match.group(1))
+        return _parse_amount(match.group(2), currency), currency
+
+    suffix_match = PRICE_SUFFIX_RE.search(compact)
+    if suffix_match:
+        currency = _currency_from_token(suffix_match.group(2))
+        return _parse_amount(suffix_match.group(1), currency), currency
+
+    if not allow_without_currency:
+        return None, None
+    amount_match = re.search(r"([0-9][0-9,.]*[0-9]|[0-9])", compact)
+    if not amount_match:
+        return None, None
+    return _parse_amount(amount_match.group(1), None), None
+
+
+def _select_price_candidate(
+    candidates: list[tuple[float, str | None]],
+    *,
+    expected_currency: str,
+    url: str,
+) -> PriceExtraction:
+    if not candidates:
+        return PriceExtraction(price=None, currency=None)
+
+    normalized_candidates = [
+        (price, normalize_currency_code(currency))
+        for price, currency in candidates
+        if price is not None
+    ]
+    for price, currency in normalized_candidates:
+        if currency == expected_currency:
+            return PriceExtraction(price=price, currency=currency)
+
+    for price, currency in normalized_candidates:
+        if currency is None:
+            return PriceExtraction(price=price, currency=expected_currency)
+
+    ignored_currency = None
+    for price, currency in normalized_candidates:
+        if should_use_price_currency(currency, expected_currency=expected_currency, url=url):
+            return PriceExtraction(price=price, currency=currency)
+        if ignored_currency is None and currency:
+            ignored_currency = currency
+
+    return PriceExtraction(price=None, currency=None, ignored_currency=ignored_currency)
+
+
+def _currency_from_token(value: str | None) -> str | None:
+    return normalize_currency_code(value)
+
+
+def _parse_amount(value: str | None, currency: str | None) -> float | None:
+    if not value:
+        return None
+    raw = re.sub(r"[^\d.,]", "", value)
+    if not raw:
+        return None
+    if currency and currency.upper() in {"JPY", "KRW", "VND", "CLP", "ISK"}:
+        return _parse_float(raw.replace(",", "").replace(".", ""))
+    decimal_index = max(raw.rfind("."), raw.rfind(","))
+    trailing = len(raw) - decimal_index - 1 if decimal_index >= 0 else 0
+    if decimal_index >= 0 and 1 <= trailing <= 2:
+        integer_part = re.sub(r"[.,]", "", raw[:decimal_index])
+        return _parse_float(f"{integer_part}.{raw[decimal_index + 1:]}")
+    return _parse_float(re.sub(r"[.,]", "", raw))
 
 
 def _parse_float(value: Any) -> float | None:
     if value is None:
         return None
+    text = str(value).replace("$", "").replace("₮", "").strip()
+    if "," in text and "." not in text and re.search(r",[0-9]{1,2}$", text):
+        text = text.replace(",", ".")
+    else:
+        text = text.replace(",", "")
     try:
-        number = float(str(value).replace("$", "").replace(",", "").strip())
+        number = float(text)
     except ValueError:
         return None
     return number if number >= 0 else None
@@ -616,6 +1291,9 @@ def _parse_float(value: Any) -> float | None:
 def _parse_int(value: Any) -> int | None:
     if value is None:
         return None
+    match = re.search(r"([0-9][0-9,]*)", str(value))
+    if match:
+        value = match.group(1)
     try:
         number = int(float(str(value).replace(",", "").strip()))
     except ValueError:

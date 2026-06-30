@@ -7,11 +7,13 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.config import settings
 from app.db.repository import save_feedback, save_scan
+from app.extraction.product_page import clean_policy_snippet, clean_review_body
 from app.ml.fake_review_service import fake_review_service
 from app.ml.risk_service import risk_model_service
 from app.ml.sentiment_service import sentiment_service
 from app.page_fetching.fetcher import PageFetchError, URLValidationError, validate_public_web_url
 from app.schemas.product_analysis import (
+    ExtractedReviewInput,
     ExtractedProductData,
     ExtractedProductScanRequest,
     FeedbackRequest,
@@ -19,7 +21,15 @@ from app.schemas.product_analysis import (
     ProductAnalysisRequest,
     ProductAnalysisResponse,
     ProductPageData,
+    ReviewInput,
 )
+from app.services.market_context import (
+    expected_currency_for_market,
+    normalize_currency_code,
+    resolve_target_market,
+    should_use_price_currency,
+)
+from app.services.market_reference import enrich_market_reference
 from app.services.product_page_analysis import ProductNotDetectedError, analyze_product_url
 from app.services.product_scoring import build_trustscore
 
@@ -43,17 +53,31 @@ def scan_product(payload: ProductAnalysisRequest) -> ProductAnalysisResponse:
 def scan_extracted_product(payload: ExtractedProductScanRequest) -> ProductAnalysisResponse:
     """Score active-tab product fields when server-side fetching is blocked."""
     try:
-        product = _sanitize_extracted_product(payload.product)
+        product, extra_signals = _sanitize_extracted_product(
+            payload.product,
+            target_market=payload.target_market,
+            locale=payload.locale,
+        )
     except URLValidationError as exc:
         raise HTTPException(
             status_code=422,
             detail={"code": "invalid_product_url", "message": str(exc)},
         ) from exc
 
+    product, market_signals = enrich_market_reference(
+        product,
+        target_market=payload.target_market,
+        locale=payload.locale,
+    )
+    extraction_signals = [
+        *_signals_from_extracted_product(product),
+        *extra_signals,
+        *market_signals,
+    ]
     response = build_trustscore(
         product,
         fetch_mode="extension_dom",
-        extraction_signals=_signals_from_extracted_product(product),
+        extraction_signals=extraction_signals,
         locale=payload.locale,
     )
     save_scan(
@@ -116,6 +140,12 @@ def model_info() -> dict[str, object]:
             "model": settings.anthropic_model if settings.ai_feedback_active else None,
             "source_when_inactive": "rule",
         },
+        "market_reference": {
+            "provider": "serper",
+            "active": bool(settings.market_reference_enabled and settings.serper_api_key),
+            "cache_ttl_seconds": settings.market_reference_cache_ttl_seconds,
+            "min_results": settings.market_reference_min_results,
+        },
         "scan_persistence": "database" if settings.database_url else (
             "local_jsonl" if settings.persist_local_scans else "disabled"
         ),
@@ -124,7 +154,11 @@ def model_info() -> dict[str, object]:
 
 def _analyze_product_url(payload: ProductAnalysisRequest) -> ProductAnalysisResponse:
     try:
-        analysis = analyze_product_url(payload.url)
+        analysis = analyze_product_url(
+            payload.url,
+            target_market=payload.target_market,
+            locale=payload.locale,
+        )
     except URLValidationError as exc:
         raise HTTPException(
             status_code=422,
@@ -157,8 +191,15 @@ def _analyze_product_url(payload: ProductAnalysisRequest) -> ProductAnalysisResp
     return response
 
 
-def _sanitize_extracted_product(product: ExtractedProductData) -> ProductPageData:
+def _sanitize_extracted_product(
+    product: ExtractedProductData,
+    *,
+    target_market: str | None = "auto",
+    locale: str | None = None,
+) -> tuple[ProductPageData, list[str]]:
     safe_url = _validate_public_reference_url(product.url)
+    resolved_market = resolve_target_market(target_market, url=safe_url, locale=locale)
+    expected_currency = expected_currency_for_market(resolved_market)
     safe_image_url = None
     if product.product_image_url:
         try:
@@ -169,26 +210,43 @@ def _sanitize_extracted_product(product: ExtractedProductData) -> ProductPageDat
     if product.seller is not None:
         seller = {
             "name": _truncate(product.seller.name, 160),
-            "rating": product.seller.rating,
+            "rating": _rating_or_none(product.seller.rating),
             "review_count": product.seller.review_count,
             "years_active": product.seller.years_active,
         }
+    currency = normalize_currency_code(_truncate(product.currency, 16))
+    price = product.price
+    average_market_price = product.average_market_price
+    extra_signals: list[str] = []
+    if price is not None and not should_use_price_currency(
+        currency,
+        expected_currency=expected_currency,
+        url=safe_url,
+    ):
+        if currency:
+            extra_signals.append(f"price_ignored_localized_currency:{currency}")
+        price = None
+        currency = None
+        average_market_price = None
+    elif price is not None and currency is None:
+        currency = expected_currency
+
     return ProductPageData(
         url=safe_url,
         site=_truncate(product.site, 255),
         product_title=_truncate(product.product_title, 240) or "Unknown product",
         description=_truncate(product.description, 1000),
         product_image_url=safe_image_url,
-        price=product.price,
-        currency=_truncate(product.currency, 16),
-        average_market_price=product.average_market_price,
+        price=price,
+        currency=currency,
+        average_market_price=average_market_price,
         seller=seller,
-        return_policy=_truncate(product.return_policy, 1000),
-        reviews=product.reviews[:50],
-        rating=product.rating,
+        return_policy=_truncate(clean_policy_snippet(product.return_policy), 1000),
+        reviews=_sanitize_reviews(product.reviews),
+        rating=_rating_or_none(product.rating),
         review_count=product.review_count,
         units_bought_recent=product.units_bought_recent,
-    )
+    ), extra_signals
 
 
 def _validate_public_reference_url(raw_url: str) -> str:
@@ -247,8 +305,42 @@ def _truncate(value: str | None, max_length: int) -> str | None:
     return compact[:max_length]
 
 
+def _sanitize_reviews(reviews: list[ExtractedReviewInput]) -> list[ReviewInput]:
+    cleaned_reviews: list[ReviewInput] = []
+    seen: set[str] = set()
+    for review in reviews[:50]:
+        text = clean_review_body(review.text)
+        if not text or text in seen:
+            continue
+        cleaned_reviews.append(
+            ReviewInput(
+                text=text[:2000],
+                rating=_rating_or_none(review.rating),
+                date=review.date,
+                verified_purchase=review.verified_purchase,
+            )
+        )
+        seen.add(text)
+    return cleaned_reviews
+
+
+def _rating_or_none(value: float | None) -> float | None:
+    if value is None:
+        return None
+    if value > 5:
+        return None
+    return value
+
+
 def _signals_from_extracted_product(product: ProductPageData) -> list[str]:
     signals = ["extension_dom", "title"]
+    host = (product.site or urlparse(product.url).hostname or "").lower()
+    if "amazon." in host:
+        signals.append("site_amazon")
+    elif host.endswith("ebay.com") or ".ebay." in host:
+        signals.append("site_ebay")
+    elif host.endswith("etsy.com") or ".etsy." in host:
+        signals.append("site_etsy")
     if product.price is not None:
         signals.append("price")
     if product.product_image_url:

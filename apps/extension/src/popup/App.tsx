@@ -12,6 +12,7 @@ import type {
   ComponentScores,
   ExtractedProductPayload,
   ProductAnalysisResponse,
+  TargetMarket,
 } from "../shared/types";
 
 type IconProps = {
@@ -55,11 +56,14 @@ type CurrentPage = {
   host: string;
   preview?: ProductPreview;
   tabId?: number;
+  targetMarket: Exclude<TargetMarket, "auto">;
   url: string;
 };
 
 const LAST_RESULT_KEY = "trustscore:lastResult";
 const BROWSER_ID_KEY = "trustscore:browserId";
+const REVIEW_UI_COPY_RE =
+  /(brief content visible,\s*double tap to read full content\.?|full content visible,\s*double tap to read brief content\.?|read more\s+read less|the media could not be loaded\.?)/gi;
 
 const Icon = ({
   children,
@@ -229,28 +233,31 @@ const LOADING_TASKS = [
   "Reading visible page signals",
   "Scoring review evidence",
   "Checking seller fields",
-  "Checking price reference",
+  "Checking listed price",
   "Checking return-policy text",
 ];
 
-const FEEDBACK_ISSUES = [
-  { label: "Score too high", value: "score_too_high" },
-  { label: "Score too low", value: "score_too_low" },
-  { label: "Wrong product", value: "wrong_product" },
-  { label: "Wrong seller", value: "wrong_seller" },
-  { label: "Wrong reviews", value: "wrong_reviews" },
-  { label: "Wrong price", value: "wrong_price" },
-  { label: "Wrong policy", value: "wrong_policy" },
-  { label: "Missing evidence", value: "missing_evidence" },
-  { label: "Other", value: "other" },
-] as const;
-
-const FEEDBACK_COMPONENTS = [
-  "review_authenticity",
-  "seller_reliability",
-  "sentiment",
-  "return_policy_clarity",
-  "price_safety",
+const FEEDBACK_CHIPS: Array<{
+  component?: keyof ComponentScores;
+  issue:
+    | "score_too_high"
+    | "score_too_low"
+    | "wrong_product"
+    | "wrong_seller"
+    | "wrong_reviews"
+    | "wrong_price"
+    | "wrong_policy"
+    | "missing_evidence"
+    | "other";
+  label: string;
+  value: string;
+}> = [
+  { label: "Wrong score", value: "wrong_score", issue: "other" },
+  { label: "Wrong price/currency", value: "wrong_price", issue: "wrong_price", component: "price_safety" },
+  { label: "Wrong seller/policy", value: "wrong_seller_policy", issue: "missing_evidence" },
+  { label: "Wrong product", value: "wrong_product", issue: "wrong_product" },
+  { label: "Missing reviews", value: "missing_reviews", issue: "wrong_reviews", component: "review_authenticity" },
+  { label: "Other", value: "other", issue: "other" },
 ] as const;
 
 function riskFromLevel(riskLevel: ProductAnalysisResponse["risk_level"]): RiskKey {
@@ -377,6 +384,7 @@ async function getCurrentPageUrl(): Promise<CurrentPage | null> {
       host: url.hostname,
       preview: preview ?? undefined,
       tabId: tab.id,
+      targetMarket: resolveTargetMarket(scanUrl, preview?.lang),
       url: scanUrl,
     };
   } catch {
@@ -420,7 +428,7 @@ async function readActiveTabProductPreview(tabId: number): Promise<ProductPrevie
   }
 }
 
-function normalizeProductPreview(value: unknown): ProductPreview | null {
+export function normalizeProductPreview(value: unknown): ProductPreview | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -473,7 +481,7 @@ function normalizeReviews(value: unknown): PreviewReview[] {
       continue;
     }
     const candidate = item as PreviewReview;
-    const text = cleanText(candidate.text)?.slice(0, 2000);
+    const text = cleanReviewText(candidate.text)?.slice(0, 2000);
     if (!text) {
       continue;
     }
@@ -499,9 +507,15 @@ function cleanText(value: unknown): string | undefined {
   return compact || undefined;
 }
 
+function cleanReviewText(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  return cleanText(value.replace(REVIEW_UI_COPY_RE, " "));
+}
+
 function cleanCurrency(value: unknown): string | undefined {
-  const compact = cleanText(value)?.slice(0, 16).toUpperCase();
-  return compact || undefined;
+  return normalizeCurrencyCode(cleanText(value));
 }
 
 function validNumber(value: unknown): number | undefined {
@@ -512,11 +526,17 @@ function validInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
-function productPayloadFromPreview(page: CurrentPage): ExtractedProductPayload | null {
+export function productPayloadFromPreview(page: CurrentPage): ExtractedProductPayload | null {
   const preview = page.preview;
   if (!preview?.title) {
     return null;
   }
+  const priceInfo = normalizePreviewPrice(
+    preview.price,
+    preview.currency,
+    page.host,
+    page.targetMarket,
+  );
 
   const seller =
     preview.seller || preview.sellerRating !== undefined || preview.sellerReviewCount !== undefined
@@ -533,8 +553,8 @@ function productPayloadFromPreview(page: CurrentPage): ExtractedProductPayload |
     product_title: limitText(preview.title, 240) ?? "Unknown product",
     description: limitText(preview.description, 4000),
     product_image_url: preview.imageUrl,
-    price: preview.price,
-    currency: limitText(preview.currency, 16),
+    price: priceInfo.price,
+    currency: priceInfo.currency,
     seller,
     return_policy: limitText(preview.returnPolicy, 4000),
     reviews: (preview.reviews ?? []).slice(0, 30),
@@ -553,6 +573,109 @@ function pageLocale(page: CurrentPage): string | undefined {
     return navigator.language;
   }
   return undefined;
+}
+
+function resolveTargetMarket(
+  urlValue: string,
+  locale?: string,
+): Exclude<TargetMarket, "auto"> {
+  let host = "";
+  try {
+    host = new URL(urlValue).hostname.toLowerCase();
+  } catch {
+    host = urlValue.toLowerCase();
+  }
+  if (host.endsWith(".co.jp") || host.endsWith(".jp")) {
+    return "JP";
+  }
+  if (host.endsWith(".co.uk") || host.endsWith(".uk")) {
+    return "UK";
+  }
+  if (/\.(de|fr|it|es|nl|be|ie|at|pt|pl|se)$/i.test(host)) {
+    return "EU";
+  }
+  if (
+    host === "amazon.com" ||
+    host.endsWith(".amazon.com") ||
+    host === "ebay.com" ||
+    host.endsWith(".ebay.com") ||
+    host === "etsy.com" ||
+    host.endsWith(".etsy.com")
+  ) {
+    return "US";
+  }
+  const lang = locale?.toLowerCase().replace("_", "-") ?? "";
+  const primary = lang.split("-", 1)[0];
+  if (primary === "ja" || lang.endsWith("-jp")) {
+    return "JP";
+  }
+  if (lang === "en-gb" || lang === "en-uk" || lang.endsWith("-gb") || lang.endsWith("-uk")) {
+    return "UK";
+  }
+  if (["de", "fr", "it", "es", "nl", "pt", "pl", "sv"].includes(primary)) {
+    return "EU";
+  }
+  return "US";
+}
+
+function expectedCurrencyForMarket(market: Exclude<TargetMarket, "auto">): string {
+  if (market === "JP") {
+    return "JPY";
+  }
+  if (market === "EU") {
+    return "EUR";
+  }
+  if (market === "UK") {
+    return "GBP";
+  }
+  return "USD";
+}
+
+function normalizeCurrencyCode(value?: string): string | undefined {
+  const raw = value?.trim().toUpperCase();
+  const token = raw?.replace(/\s+/g, "");
+  if (!token) {
+    return undefined;
+  }
+  if (token === "$" || token === "US$" || token === "USD") {
+    return "USD";
+  }
+  if (token === "¥" || token === "￥" || token === "円" || token === "JPY" || token === "JP¥") {
+    return "JPY";
+  }
+  if (token === "€" || token === "EUR") {
+    return "EUR";
+  }
+  if (token === "£" || token === "GBP") {
+    return "GBP";
+  }
+  if (token === "MNT" || token === "₮") {
+    return "MNT";
+  }
+  const tokens = raw?.replace(/[_-]/g, " ").split(/\s+/) ?? [];
+  for (const code of ["USD", "JPY", "EUR", "GBP", "MNT"]) {
+    if (tokens.includes(code)) {
+      return code;
+    }
+  }
+  return /^[A-Z]{3}$/.test(token) ? token : token.slice(0, 16);
+}
+
+function normalizePreviewPrice(
+  price: number | undefined,
+  currency: string | undefined,
+  _host: string,
+  market: Exclude<TargetMarket, "auto">,
+): { price?: number; currency?: string; ignoredCurrency?: string } {
+  if (price === undefined) {
+    return {};
+  }
+  const expected = expectedCurrencyForMarket(market);
+  const normalizedCurrency = normalizeCurrencyCode(currency);
+  if (normalizedCurrency && !["USD", "JPY", "EUR", "GBP"].includes(normalizedCurrency)) {
+    return { ignoredCurrency: normalizedCurrency };
+  }
+  return { price, currency: normalizedCurrency ?? expected };
 }
 
 const RTL_LANGS = new Set(["ar", "he", "fa", "ur", "ps", "sd"]);
@@ -581,6 +704,10 @@ function limitText(value: string | undefined, maxLength: number): string | undef
 }
 
 async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
+  const host = window.location.hostname.toLowerCase();
+  const reviewUiCopyRe =
+    /(brief content visible,\s*double tap to read full content\.?|full content visible,\s*double tap to read brief content\.?|read more\s+read less|the media could not be loaded\.?)/gi;
+
   function text(selector: string): string | undefined {
     const element = document.querySelector(selector);
     const value =
@@ -595,9 +722,62 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
     return compact(value);
   }
 
+  function firstText(selectors: string[]): string | undefined {
+    return firstTexts(selectors, 1)[0];
+  }
+
+  function firstTexts(selectors: string[], limit: number): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const selector of selectors) {
+      for (const element of Array.from(document.querySelectorAll(selector))) {
+        const value = compact(
+          element instanceof HTMLMetaElement
+            ? element.getAttribute("content")
+            : element.textContent,
+        );
+        if (!value || seen.has(value)) {
+          continue;
+        }
+        out.push(value);
+        seen.add(value);
+        if (out.length >= limit) {
+          return out;
+        }
+      }
+    }
+    return out;
+  }
+
+  function firstAttr(selectors: string[], attribute: string): string | undefined {
+    for (const selector of selectors) {
+      const value = attr(selector, attribute);
+      if (value) {
+        return value;
+      }
+    }
+    return undefined;
+  }
+
   function compact(value: string | null | undefined): string | undefined {
     const cleaned = value?.replace(/\s+/g, " ").trim();
     return cleaned || undefined;
+  }
+
+  function cleanReviewBody(value: string | null | undefined): string | undefined {
+    return compact(value?.replace(reviewUiCopyRe, " "));
+  }
+
+  function isAmazon(): boolean {
+    return /(^|\.)amazon\./i.test(host);
+  }
+
+  function isEbay(): boolean {
+    return /(^|\.)ebay\./i.test(host);
+  }
+
+  function isEtsy(): boolean {
+    return /(^|\.)etsy\./i.test(host);
   }
 
   function absoluteUrl(value: string | undefined): string | undefined {
@@ -644,7 +824,34 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
       .sort((a, b) => b.score - a.score)[0]?.url;
   }
 
+  function imageFromSelectors(selectors: string[]): string | undefined {
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (!element) {
+        continue;
+      }
+      const dynamic = dynamicImage(element.getAttribute("data-a-dynamic-image") ?? undefined);
+      const fromSrcset = srcsetImage(
+        element.getAttribute("srcset") ?? element.getAttribute("data-srcset") ?? undefined,
+      );
+      const raw =
+        dynamic ||
+        element.getAttribute("data-old-hires") ||
+        element.getAttribute("data-src") ||
+        element.getAttribute("src") ||
+        fromSrcset;
+      const imageUrl = absoluteUrl(compact(raw ?? undefined));
+      if (imageUrl) {
+        return imageUrl;
+      }
+    }
+    return undefined;
+  }
+
   function detectCurrency(value: string): string | undefined {
+    if (/₮|MNT/i.test(value)) {
+      return "MNT";
+    }
     if (/¥|円|JPY/i.test(value)) {
       return "JPY";
     }
@@ -700,12 +907,35 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
     return match ? Number(match[1].replace(/,/g, "")) : undefined;
   }
 
+  function sellerRatingFromPercent(value: string | undefined): number | undefined {
+    const match = value?.match(/([0-9]{1,3}(?:[.,][0-9]+)?)\s*%\s*(?:positive|feedback)?/i);
+    if (!match) {
+      return undefined;
+    }
+    const percent = Number(match[1].replace(",", "."));
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+      return undefined;
+    }
+    return Math.round((percent / 20) * 10) / 10;
+  }
+
+  function sellerReviewCountFromText(value: string | undefined): number | undefined {
+    const match = value?.match(
+      /([0-9][0-9,.]*)\s*(?:feedback|seller reviews?|shop reviews?|reviews?)/i,
+    );
+    return match ? Number(match[1].replace(/[,.](?=\d{3}\b)/g, "")) : undefined;
+  }
+
   function cleanSeller(value: string | undefined): string | undefined {
     return compact(
       value
         ?.replace(/^Visit the\s+/i, "")
         .replace(/^Brand:\s*/i, "")
         .replace(/^Sold by\s*/i, "")
+        .replace(/^Seller:\s*/i, "")
+        .replace(/^Shop\s+/i, "")
+        .replace(/\s+on\s+Etsy$/i, "")
+        .replace(/\s+\|\s*eBay$/i, "")
         .replace(/\s+Storefront$/i, " Store"),
     );
   }
@@ -719,13 +949,23 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
   function reviewsFromDom(): Array<{ text: string; rating?: number; verified_purchase?: boolean }> {
     const nodes = Array.from(
       document.querySelectorAll(
-        '[data-hook="review"], [data-hook="cmps-review"], div[id^="customer_review-"], div[id^="customer_review_foreign-"], .review',
+        [
+          '[data-hook="review"]',
+          '[data-hook="cmps-review"]',
+          'div[id^="customer_review-"]',
+          'div[id^="customer_review_foreign-"]',
+          '[data-review-region]',
+          '[data-review-text]',
+          '[data-testid*="review"]',
+          '.review-item-content',
+          '.review',
+        ].join(", "),
       ),
     ).slice(0, 40);
     const out: Array<{ text: string; rating?: number; verified_purchase?: boolean }> = [];
     const seen = new Set<string>();
     for (const node of nodes) {
-      const body = compact(
+      const body = cleanReviewBody(
         // Current Amazon layout uses the reviewText / reviewTextContainer hooks;
         // the legacy review-body / review-collapsed hooks are kept as fallbacks.
         node.querySelector('[data-hook="reviewText"] span')?.textContent ||
@@ -737,9 +977,13 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
           node.querySelector('[data-hook="review-collapsed"] span')?.textContent ||
           node.querySelector(".review-text-content span")?.textContent ||
           node.querySelector(".review-text-content, .cr-original-review-text")?.textContent ||
+          node.querySelector('[data-review-text]')?.textContent ||
+          node.querySelector(".review-item-content")?.textContent ||
+          node.querySelector("p")?.textContent ||
+          node.textContent ||
           undefined,
       );
-      if (!body || seen.has(body)) {
+      if (!body || body.length < 20 || seen.has(body)) {
         continue;
       }
       seen.add(body);
@@ -760,6 +1004,12 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
   function descriptionFromDom(): string | undefined {
     return compact(
       texts("#feature-bullets li:not(.aok-hidden) .a-list-item").join(". ") ||
+        firstText([
+          "[data-testid='ux-layout-section__item']",
+          "[data-region='listing-page-description']",
+          "[data-id='description-text']",
+          "#viTabs_0_is",
+        ]) ||
         text("#productDescription") ||
         text("#bookDescription_feature_div") ||
         attr("meta[name='description']", "content"),
@@ -768,7 +1018,17 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
 
   function returnPolicyFromDom(): string | undefined {
     return compact(
-      text("#productSupportAndReturnPolicy-secondary-content") ||
+      firstText([
+        "[data-testid='x-returns-minview']",
+        "[data-testid='ux-labels-values-Returns']",
+        "[data-testid='returns-policy']",
+        "[data-policies-return-policy]",
+        "[data-region='listing-page-policies']",
+        "[data-region='return-policy']",
+        "[id*='return-policy']",
+        "[class*='return-policy']",
+      ]) ||
+        text("#productSupportAndReturnPolicy-secondary-content") ||
         text("#productSupportAndReturnPolicy_feature_div") ||
         text("#RETURNS_POLICY_feature_div") ||
         text("#dp-returns-policy_feature_div") ||
@@ -777,6 +1037,177 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
         text('a[data-csa-c-content-id*="return"]') ||
         text('[id*="RETURNS_POLICY"]'),
     );
+  }
+
+  function titleFromDom(): string | undefined {
+    if (isEbay()) {
+      return (
+        firstText([
+          "h1.x-item-title__mainTitle span",
+          "[data-testid='x-item-title'] h1",
+          "[data-testid='x-item-title']",
+          "h1 span.ux-textspans",
+          "h1",
+        ]) || attr("meta[property='og:title']", "content")
+      );
+    }
+    if (isEtsy()) {
+      return (
+        firstText([
+          "h1[data-buy-box-listing-title]",
+          "[data-buy-box-region='title'] h1",
+          "h1.wt-text-body-01",
+          "h1",
+        ]) || attr("meta[property='og:title']", "content")
+      );
+    }
+    return (
+      text("#productTitle") ||
+      text("[data-feature-name='title'] h1") ||
+      text("h1") ||
+      attr("meta[property='og:title']", "content") ||
+      document.title
+    );
+  }
+
+  function imageFromDom(): string | undefined {
+    if (isEbay()) {
+      return imageFromSelectors([
+        "img#icImg",
+        "[data-testid='ux-image-carousel-item'] img",
+        ".ux-image-carousel-item img",
+        ".ux-image-carousel img",
+        "img[srcset]",
+      ]);
+    }
+    if (isEtsy()) {
+      return imageFromSelectors([
+        "[data-carousel] img",
+        ".listing-page-image-carousel-component img",
+        "[data-listing-page-image] img",
+        "img[srcset]",
+      ]);
+    }
+    return imageFromSelectors(["#landingImage", "img[srcset]", "img"]);
+  }
+
+  function sellerFromDom(): string | undefined {
+    if (isEbay()) {
+      return cleanSeller(
+        firstText([
+          "[data-testid='x-sellercard-atf__info'] a",
+          "[data-testid='x-sellercard-atf__info']",
+          ".x-sellercard-atf__info__about-seller a",
+          ".x-sellercard-atf__info__about-seller",
+          "[data-testid='ux-seller-section__item'] a",
+          "[class*='seller'] a",
+        ]),
+      );
+    }
+    if (isEtsy()) {
+      return cleanSeller(
+        firstText([
+          "a[data-buy-box-region='shop-name']",
+          "[data-buy-box-region='shop-name'] a",
+          "a[data-region='shop-name']",
+          "[data-region='shop-name'] a",
+          "a[href*='/shop/'][data-region]",
+          ".shop-name a",
+          "a[href*='/shop/']",
+        ]),
+      );
+    }
+    return cleanSeller(
+      text("#bylineInfo") ||
+        text("#sellerProfileTriggerId") ||
+        text("[tabular-attribute-name='Sold by'] .tabular-buybox-text") ||
+        text("#merchant-info") ||
+        attr("meta[property='product:brand']", "content") ||
+        attr("meta[name='brand']", "content"),
+    );
+  }
+
+  function priceTextFromDom(): string | undefined {
+    if (isEbay()) {
+      return firstText([
+        "[data-testid='x-price-primary'] span",
+        ".x-price-primary span",
+        ".x-price-approx span",
+        "[itemprop='price']",
+      ]);
+    }
+    if (isEtsy()) {
+      return (
+        firstText([
+          "[data-buy-box-region='price']",
+          "p[data-buy-box-region='price']",
+          ".wt-text-title-03",
+          "[data-selector='price-only']",
+        ]) || attr("meta[property='product:price:amount']", "content")
+      );
+    }
+    return (
+      text("#corePrice_feature_div .a-price .a-offscreen") ||
+      text("#corePrice_feature_div .a-price") ||
+      text(".a-price .a-offscreen") ||
+      text(".a-price") ||
+      text("#priceblock_ourprice") ||
+      text("#priceblock_dealprice") ||
+      text("#price_inside_buybox") ||
+      attr("meta[property='product:price:amount']", "content")
+    );
+  }
+
+  function ratingTextFromDom(): string | undefined {
+    if (isEtsy()) {
+      return firstText([
+        "[data-review-star-rating]",
+        "[aria-label*='out of 5 stars']",
+        "[aria-label*='stars']",
+      ]);
+    }
+    if (isEbay()) {
+      return firstText(["[data-testid*='rating']", "[aria-label*='out of 5 stars']"]);
+    }
+    return text("#acrPopover") || attr("#acrPopover", "title");
+  }
+
+  function reviewCountTextFromDom(): string | undefined {
+    if (isEtsy()) {
+      return (
+        firstAttr(["[data-reviews-total-count]"], "data-reviews-total-count") ||
+        firstText(["[data-reviews-total-count]", "a[href*='reviews']", "button[aria-label*='review']"])
+      );
+    }
+    if (isEbay()) {
+      return firstText(["[data-testid*='review-count']", "[aria-label*='review']", ".reviews"]);
+    }
+    return text("#acrCustomerReviewText");
+  }
+
+  function sellerFeedbackTextFromDom(): string | undefined {
+    if (isEbay()) {
+      return compact(
+        firstTexts(
+          [
+            "[data-testid='x-sellercard-atf__data-item']",
+            ".x-sellercard-atf__data-item",
+            "[data-testid='ux-seller-section__item']",
+            "[class*='seller']",
+          ],
+          8,
+        ).join(" "),
+      );
+    }
+    if (isEtsy()) {
+      return compact(
+        firstTexts(
+          ["[data-region='shop-rating']", "[aria-label*='shop reviews']", "a[href*='reviews']"],
+          8,
+        ).join(" "),
+      );
+    }
+    return undefined;
   }
 
   // "8K+ bought in past month" style social-proof badge: recent sales volume
@@ -823,36 +1254,11 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
 
   await waitForReviews();
 
-  const title =
-    text("#productTitle") ||
-    text("[data-feature-name='title'] h1") ||
-    text("h1") ||
-    attr("meta[property='og:title']", "content") ||
-    document.title;
-
-  const imageUrl = absoluteUrl(
-    dynamicImage(attr("#landingImage", "data-a-dynamic-image")) ||
-      attr("#landingImage", "data-old-hires") ||
-      attr("#landingImage", "src") ||
-      srcsetImage(attr("img[srcset]", "srcset")) ||
-      attr("meta[property='og:image']", "content") ||
-      attr("img", "src"),
-  );
-
-  const seller = cleanSeller(
-    text("#bylineInfo") ||
-      text("#sellerProfileTriggerId") ||
-      text("[tabular-attribute-name='Sold by'] .tabular-buybox-text") ||
-      text("#merchant-info") ||
-      attr("meta[property='product:brand']", "content") ||
-      attr("meta[name='brand']", "content"),
-  );
-
-  const priceInfo = priceFromText(
-    text("#corePrice_feature_div .a-price .a-offscreen") ||
-      text(".a-price .a-offscreen") ||
-      attr("meta[property='product:price:amount']", "content"),
-  );
+  const title = titleFromDom();
+  const imageUrl = imageFromDom() || absoluteUrl(attr("meta[property='og:image']", "content"));
+  const seller = sellerFromDom();
+  const priceInfo = priceFromText(priceTextFromDom());
+  const sellerFeedback = sellerFeedbackTextFromDom();
 
   const lang = compact(
     document.documentElement.getAttribute("lang") ||
@@ -864,10 +1270,12 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
     title: compact(title),
     imageUrl,
     seller,
+    sellerRating: sellerRatingFromPercent(sellerFeedback),
+    sellerReviewCount: sellerReviewCountFromText(sellerFeedback),
     price: priceInfo.price,
     currency: priceInfo.currency || attr("meta[property='product:price:currency']", "content"),
-    rating: numberFromText(text("#acrPopover") || attr("#acrPopover", "title")),
-    reviewCount: numberFromText(text("#acrCustomerReviewText")),
+    rating: numberFromText(ratingTextFromDom()),
+    reviewCount: numberFromText(reviewCountTextFromDom()),
     unitsBoughtRecent: recentPurchasesFromDom(),
     description: descriptionFromDom(),
     returnPolicy: returnPolicyFromDom(),
@@ -1009,11 +1417,117 @@ function ScoreRing({ score, risk }: { score: number; risk: RiskKey }) {
   );
 }
 
+type CoverageStatus = "read" | "partial" | "missing" | "not-scored";
+type CoverageItem = {
+  detail: string;
+  icon: (props: IconProps) => ReactElement;
+  label: string;
+  status: CoverageStatus;
+};
+
+function signalCoverage(result: ProductAnalysisResponse): CoverageItem[] {
+  const evidence = new Map(result.evidence.map((item) => [item.component, item] as const));
+  const reviews = evidence.get("review_authenticity");
+  const seller = evidence.get("seller_reliability");
+  const price = evidence.get("price_safety");
+  const policy = evidence.get("return_policy_clarity");
+  const priceEvidence = price?.evidence ?? [];
+  const marketEvidence = priceEvidence.find((item) =>
+    item.toLowerCase().includes("market reference found"),
+  );
+  const listedPriceRead = priceEvidence.some((item) => item.toLowerCase().includes("listed price"));
+  const priceScored = !result.model_modes.price_safety?.startsWith("not_scored");
+  const policyScored = !result.model_modes.return_policy_clarity?.startsWith("not_scored");
+
+  return [
+    {
+      detail: reviews?.evidence[0] ?? "No visible review text",
+      icon: I.ReviewAuth,
+      label: "Reviews",
+      status: reviews?.evidence.length ? "read" : "missing",
+    },
+    {
+      detail: seller?.evidence[0] ?? "No seller profile",
+      icon: I.Seller,
+      label: "Seller",
+      status: seller?.evidence.length
+        ? seller.missing_inputs.length
+          ? "partial"
+          : "read"
+        : "missing",
+    },
+    {
+      detail: price?.evidence[0] ?? "No visible price",
+      icon: I.Price,
+      label: "Price",
+      status: priceScored
+        ? listedPriceRead
+          ? "read"
+          : "missing"
+        : price?.evidence.length
+          ? "not-scored"
+          : "missing",
+    },
+    {
+      detail: policy?.evidence[0] ?? "No return-policy text",
+      icon: I.Return,
+      label: "Returns",
+      status: policyScored ? (policy?.evidence.length ? "read" : "missing") : "not-scored",
+    },
+    {
+      detail: marketEvidence ?? "No verified market reference found",
+      icon: I.Search,
+      label: "Market",
+      status: marketEvidence ? "read" : "not-scored",
+    },
+  ];
+}
+
+function statusText(status: CoverageStatus): string {
+  if (status === "read") {
+    return "Read";
+  }
+  if (status === "partial") {
+    return "Partial";
+  }
+  if (status === "not-scored") {
+    return "Not scored";
+  }
+  return "Missing";
+}
+
+function SignalCoverageSection({ result }: { result: ProductAnalysisResponse }) {
+  return (
+    <>
+      <div className="sec-h">
+        <h3>What was read</h3>
+      </div>
+      <div className="signal-coverage">
+        {signalCoverage(result).map((item) => {
+          const CoverageIcon = item.icon;
+          return (
+            <div className={`coverage-item is-${item.status}`} key={item.label}>
+              <div className="coverage-icon">
+                <CoverageIcon size={13} />
+              </div>
+              <div className="coverage-copy">
+                <div className="lbl">{item.label}</div>
+                <div className="sub">{item.detail}</div>
+              </div>
+              <div className="coverage-status">{statusText(item.status)}</div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 function Header({ state }: { state: ViewState }) {
   return (
     <div className="popup-head">
       <div className="logo">
-        <I.Shield size={16} sw={2.2} />
+        <img alt="" src="/icons/icon-32.png" />
       </div>
       <div>
         <div className="brand-name">AI TrustScore</div>
@@ -1038,10 +1552,15 @@ function HomeState({
   const preview = page.preview;
   const title = preview?.title || page.host;
   const seller = preview?.seller || "Seller not visible";
+  const previewPrice = preview
+    ? normalizePreviewPrice(preview.price, preview.currency, page.host, page.targetMarket)
+    : {};
   const price =
-    typeof preview?.price === "number"
-      ? formatMoney(preview.price, preview.currency, preview.lang)
-      : "Price not visible";
+    typeof previewPrice.price === "number"
+      ? formatMoney(previewPrice.price, previewPrice.currency, preview?.lang)
+      : previewPrice.ignoredCurrency
+        ? "Localized price ignored"
+        : "Price not visible";
 
   return (
     <div className="popup-body fade-swap">
@@ -1094,9 +1613,6 @@ function HomeState({
         <I.Sparkles size={15} />
         Analyze product
       </button>
-      <div className="helper-text">
-        Uses FastAPI first · falls back to active-tab preview if the site blocks backend fetching
-      </div>
       <button className="btn btn-secondary btn-block btn-sm refresh-page" onClick={onRefresh} type="button">
         <I.Search size={13} />
         Re-check active tab
@@ -1120,7 +1636,7 @@ function LoadingState({ progress }: { progress: number }) {
 
       <div className="loading-title">Analyzing this product</div>
       <div className="loading-copy">
-        FastAPI is extracting available evidence and scoring only the signals it can verify.
+        Reading visible product evidence and scoring only verified signals.
       </div>
 
       <div className="progress-block">
@@ -1160,7 +1676,7 @@ function DetectingState() {
           <I.Search size={26} />
         </div>
         <h3>Checking current page</h3>
-        <p>Reading the active tab URL before sending it to the backend.</p>
+        <p>Checking whether this page has visible product evidence.</p>
       </div>
     </div>
   );
@@ -1182,11 +1698,15 @@ function ResultState({
   const evidenceByComponent = new Map(
     result.evidence.map((item) => [item.component, item] as const),
   );
-  const sourceLabel = result.fetch_mode === "extension_dom" ? "Active-tab fallback" : "Backend fetch";
+  const sourceLabel = result.fetch_mode === "extension_dom" ? "Active-tab scan" : "Page scan";
   const isLowConfidence = result.confidence < 0.55;
 
+  function isScored(name: keyof ComponentScores): boolean {
+    return name !== "user_feedback_history" && !result.model_modes[name]?.startsWith("not_scored");
+  }
+
   function isGrounded(name: keyof ComponentScores): boolean {
-    if (name === "user_feedback_history") {
+    if (!isScored(name)) {
       return false;
     }
     const item = evidenceByComponent.get(name);
@@ -1211,6 +1731,13 @@ function ResultState({
           </div>
         </div>
       </div>
+
+      {isLowConfidence ? (
+        <div className="confidence-banner">
+          <I.AlertTriangle size={14} />
+          <span>Limited evidence. Treat this score as a triage signal, not a final verdict.</span>
+        </div>
+      ) : null}
 
       <div className="score-wrap">
         <ScoreRing risk={risk} score={result.trust_score} />
@@ -1240,6 +1767,8 @@ function ResultState({
           <span>Missing: {result.missing_inputs.slice(0, 4).join(", ")}</span>
         </div>
       ) : null}
+
+      <SignalCoverageSection result={result} />
 
       <div className="sec-h">
         <h3>Top reasons</h3>
@@ -1286,7 +1815,9 @@ function ResultState({
               ? "Not applied to score"
               : grounded
                 ? metricSubtitle(name, score)
-                : "No visible data on this page";
+                : result.model_modes[name]?.startsWith("not_scored")
+                  ? "Not scored for this page"
+                  : "No visible data on this page";
           return (
             <div className={`metric is-${tone} ${grounded ? "" : "is-nodata"}`} key={name}>
               <div className="ic">
@@ -1378,16 +1909,18 @@ function EvidenceSection({ evidence }: { evidence: ComponentEvidence[] }) {
 function FeedbackBlock({ scanId }: { scanId: string }) {
   const [vote, setVote] = useState<"yes" | "no" | null>(null);
   const [comment, setComment] = useState("");
-  const [issueCategory, setIssueCategory] =
-    useState<(typeof FEEDBACK_ISSUES)[number]["value"] | "">("");
-  const [component, setComponent] = useState<(typeof FEEDBACK_COMPONENTS)[number] | "">("");
+  const [selectedChip, setSelectedChip] = useState<(typeof FEEDBACK_CHIPS)[number] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<"saved" | "accepted" | null>(null);
 
-  async function handleSubmit() {
-    if (!vote) {
+  async function handleSubmit(
+    nextVote = vote,
+    chip: typeof selectedChip = selectedChip,
+    note = comment,
+  ) {
+    if (!nextVote) {
       return;
     }
 
@@ -1398,10 +1931,10 @@ function FeedbackBlock({ scanId }: { scanId: string }) {
       const response = await submitFeedback({
         scan_id: scanId,
         browser_id: browserId,
-        helpful: vote === "yes",
-        issue_category: issueCategory || (vote === "no" ? "other" : undefined),
-        corrected_component: component || undefined,
-        comment: comment || undefined,
+        helpful: nextVote === "yes",
+        issue_category: chip?.issue || (nextVote === "no" ? "other" : undefined),
+        corrected_component: chip?.component,
+        comment: note || undefined,
       });
       setFeedbackStatus(response.status);
       setSubmitted(true);
@@ -1438,7 +1971,12 @@ function FeedbackBlock({ scanId }: { scanId: string }) {
       <div className="fb-row">
         <button
           className={`fb-btn is-yes ${vote === "yes" ? "is-active" : ""}`}
-          onClick={() => setVote("yes")}
+          disabled={isSubmitting}
+          onClick={() => {
+            setVote("yes");
+            setSelectedChip(null);
+            void handleSubmit("yes", null, "");
+          }}
           type="button"
         >
           <I.ThumbsUp size={13} />
@@ -1446,13 +1984,16 @@ function FeedbackBlock({ scanId }: { scanId: string }) {
         </button>
         <button
           className={`fb-btn is-no ${vote === "no" ? "is-active" : ""}`}
-          onClick={() => setVote("no")}
+          onClick={() => {
+            setVote("no");
+            setSelectedChip(null);
+          }}
           type="button"
         >
           <I.ThumbsDown size={13} />
           No
         </button>
-        {vote ? (
+        {vote === "no" ? (
           <button
             className="btn btn-primary btn-sm"
             disabled={isSubmitting}
@@ -1465,47 +2006,25 @@ function FeedbackBlock({ scanId }: { scanId: string }) {
           </button>
         ) : null}
       </div>
-      {vote ? (
-        <div className="fb-structured">
-          <select
-            aria-label="Feedback issue"
-            onChange={(event) =>
-              setIssueCategory(event.target.value as (typeof FEEDBACK_ISSUES)[number]["value"] | "")
-            }
-            value={issueCategory}
-          >
-            <option value="">What was off? (optional)</option>
-            {FEEDBACK_ISSUES.map((issue) => (
-              <option key={issue.value} value={issue.value}>
-                {issue.label}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Affected signal"
-            onChange={(event) =>
-              setComponent(event.target.value as (typeof FEEDBACK_COMPONENTS)[number] | "")
-            }
-            value={component}
-          >
-            <option value="">Signal affected (optional)</option>
-            {FEEDBACK_COMPONENTS.map((key) => (
-              <option key={key} value={key}>
-                {COMPONENT_CONFIG[key].label}
-              </option>
-            ))}
-          </select>
+      {vote === "no" ? (
+        <div className="fb-chip-grid" aria-label="What was off">
+          {FEEDBACK_CHIPS.map((chip) => (
+            <button
+              className={`fb-chip ${selectedChip?.value === chip.value ? "is-active" : ""}`}
+              key={chip.value}
+              onClick={() => setSelectedChip(chip)}
+              type="button"
+            >
+              {chip.label}
+            </button>
+          ))}
         </div>
       ) : null}
-      {vote ? (
+      {vote === "no" ? (
         <textarea
           className="fb-input"
           onChange={(event) => setComment(event.target.value)}
-          placeholder={
-            vote === "yes"
-              ? "What worked well? (optional)"
-              : "What was off about this result? (optional)"
-          }
+          placeholder="Add a short note for review (optional)"
           rows={2}
           value={comment}
         />
@@ -1531,11 +2050,11 @@ function ErrorState({
           <I.AlertTriangle size={26} />
         </div>
         <h3>{errorTitle(code)}</h3>
-        <p>{error}</p>
+        <p>{errorMessage(code, error)}</p>
         <p>{errorHint(code)}</p>
         <button className="btn btn-secondary btn-block btn-sm" onClick={onAnalyze} type="button">
           <I.Search size={13} />
-          Try again
+          Scan again
         </button>
       </div>
     </div>
@@ -1550,9 +2069,30 @@ function errorTitle(code?: string | null): string {
     return "Unsupported URL";
   }
   if (code === "product_page_unavailable") {
-    return "Page could not be fetched";
+    return "Page scan blocked";
   }
-  return "Connection failed";
+  if (code === "validation_error") {
+    return "Scan details need a refresh";
+  }
+  return "Could not scan this page";
+}
+
+function errorMessage(code: string | null | undefined, fallback: string): string {
+  if (code === "product_not_detected") {
+    return "TrustScore could not find enough product details on this page.";
+  }
+  if (code === "invalid_product_url") {
+    return "This page type is not supported for product safety scanning.";
+  }
+  if (code === "product_page_unavailable") {
+    return "This shop blocked the page scan before enough product details were readable.";
+  }
+  if (code === "validation_error") {
+    return "The page details changed while the scan was starting.";
+  }
+  return fallback && !fallback.toLowerCase().includes("backend")
+    ? fallback
+    : "TrustScore could not complete the scan right now.";
 }
 
 function errorHint(code?: string | null): string {
@@ -1563,9 +2103,12 @@ function errorHint(code?: string | null): string {
     return "Use a public HTTP or HTTPS product page. Local, private-network, credentialed, or non-default-port URLs are blocked.";
   }
   if (code === "product_page_unavailable") {
-    return "The backend is running, but it could not fetch readable product-page HTML from this URL.";
+    return "Re-check the active tab so TrustScore can use the product details visible in your browser.";
   }
-  return "Start FastAPI at http://localhost:8000 and try again.";
+  if (code === "validation_error") {
+    return "Re-check the page, then scan again.";
+  }
+  return "Refresh the product page and scan again.";
 }
 
 function EmptyState({
@@ -1593,36 +2136,28 @@ function EmptyState({
   );
 }
 
-function Footer({ state }: { state: ViewState }) {
-  return (
-    <div className="popup-foot">
-      <I.Lock size={11} />
-      <span>{state === "result" ? "Live API inference" : "Private workflow test"}</span>
-      <span className="version">v1.1.0</span>
-    </div>
-  );
-}
-
 async function analyzeProductWithPreviewFallback(
   page: CurrentPage,
 ): Promise<ProductAnalysisResponse> {
   const browserId = await getOrCreateBrowserId();
   const locale = pageLocale(page);
-  try {
-    return await analyzeProduct({ url: page.url, browser_id: browserId, locale });
-  } catch (requestError) {
-    const canUsePreview =
-      requestError instanceof ApiError &&
-      (requestError.code === "product_page_unavailable" ||
-        requestError.code === "product_not_detected");
-    const product = canUsePreview ? productPayloadFromPreview(page) : null;
+  const previewProduct = productPayloadFromPreview(page);
 
-    if (!product) {
-      throw requestError;
-    }
-
-    return analyzeExtractedProduct({ product, browser_id: browserId, locale });
+  if (previewProduct) {
+    return analyzeExtractedProduct({
+      product: previewProduct,
+      browser_id: browserId,
+      locale,
+      target_market: page.targetMarket,
+    });
   }
+
+  return analyzeProduct({
+    url: page.url,
+    browser_id: browserId,
+    locale,
+    target_market: page.targetMarket,
+  });
 }
 
 function App() {
@@ -1706,7 +2241,7 @@ function App() {
       const message =
         requestError instanceof Error
           ? requestError.message
-          : "Could not connect to the backend.";
+          : "TrustScore could not complete the scan right now.";
       setErrorCode(requestError instanceof ApiError ? requestError.code ?? null : null);
       setError(message);
       setState("error");
@@ -1759,7 +2294,6 @@ function App() {
           reason="Open an HTTP or HTTPS page first."
         />
       ) : null}
-      {state !== "loading" ? <Footer state={state} /> : null}
     </main>
   );
 }

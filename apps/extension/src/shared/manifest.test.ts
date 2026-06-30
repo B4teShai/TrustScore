@@ -15,4 +15,14 @@ describe("extension manifest", () => {
     expect(manifest.host_permissions).not.toContain("https://*/*");
     expect(manifest.host_permissions).not.toContain("http://*/*");
   });
+
+  it("declares packaged icons for the extension preview and toolbar action", () => {
+    expect(manifest.icons).toEqual({
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png",
+    });
+    expect(manifest.action.default_icon).toEqual(manifest.icons);
+  });
 });

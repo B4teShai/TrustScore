@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from app.core.config import settings
+from collections.abc import Iterable
+
 from app.schemas.product_analysis import ComponentScores
 
 
@@ -45,7 +47,12 @@ def clamp_score(value: float) -> int:
     return max(0, min(100, round(value)))
 
 
-def calculate_trustscore(scores: ComponentScores, *, include_feedback: bool = False) -> int:
+def calculate_trustscore(
+    scores: ComponentScores,
+    *,
+    include_feedback: bool = False,
+    active_components: Iterable[str] | None = None,
+) -> int:
     """Apply active TrustScore weights and normalize to a 0-100 public score.
 
     Feedback is excluded by default because the runtime currently stores
@@ -62,7 +69,12 @@ def calculate_trustscore(scores: ComponentScores, *, include_feedback: bool = Fa
     if include_feedback and settings.trust_weight_feedback > 0:
         weights["user_feedback_history"] = settings.trust_weight_feedback
 
-    active = {key: weight for key, weight in weights.items() if weight > 0}
+    allowed = set(active_components) if active_components is not None else None
+    active = {
+        key: weight
+        for key, weight in weights.items()
+        if weight > 0 and (allowed is None or key in allowed)
+    }
     total_weight = sum(active.values())
     if total_weight <= 0:
         return 50
@@ -81,13 +93,20 @@ def classify_risk(score: int) -> str:
     return "High Risk"
 
 
-def top_reasons(scores: ComponentScores) -> list[str]:
+def top_reasons(
+    scores: ComponentScores,
+    *,
+    active_components: Iterable[str] | None = None,
+) -> list[str]:
     """Explain the three weakest component scores."""
+    allowed = set(active_components) if active_components is not None else None
     score_values = {
         key: value
         for key, value in scores.model_dump().items()
-        if key != "user_feedback_history"
+        if key != "user_feedback_history" and (allowed is None or key in allowed)
     }
+    if not score_values:
+        return []
     weakest_components = sorted(score_values.items(), key=lambda item: item[1])[:3]
     return [_reason_for_score(component, score) for component, score in weakest_components]
 

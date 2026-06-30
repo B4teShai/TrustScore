@@ -1,7 +1,7 @@
 {
   "name": "trustscore-best",
   "model_version": "1.0.0",
-  "assembled_at": "2026-06-27T11:13:57.226657+00:00",
+  "assembled_at": "2026-06-30T15:37:32.983770+00:00",
   "description": "Curated best leakage-safe model per TrustScore signal. Version-by-version artifacts remain under ml/artifacts/{v1,v2,v3}.",
   "weights": {
     "review_authenticity": 0.3,

@@ -8,6 +8,7 @@ import type {
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+let modernExtractedPayloadSupported: boolean | null = null;
 
 export class ApiError extends Error {
   status: number;
@@ -62,17 +63,36 @@ export function analyzeProduct(
   );
 }
 
-export function analyzeExtractedProduct(
+export async function analyzeExtractedProduct(
   payload: ExtractedProductAnalysisPayload,
 ): Promise<ProductAnalysisResponse> {
-  return requestJson<ProductAnalysisResponse>(
-    "/api/v1/scan-extracted",
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
-    isProductAnalysisResponse,
-  );
+  const requestPayload =
+    hasModernExtractedOnlyFields(payload) && !(await backendSupportsModernExtractedPayload())
+      ? toLegacyExtractedPayload(payload)
+      : payload;
+  try {
+    return await requestJson<ProductAnalysisResponse>(
+      "/api/v1/scan-extracted",
+      {
+        method: "POST",
+        body: JSON.stringify(requestPayload),
+      },
+      isProductAnalysisResponse,
+    );
+  } catch (error) {
+    if (!(error instanceof ApiError) || !shouldRetryLegacyExtractedPayload(error, requestPayload)) {
+      throw error;
+    }
+    modernExtractedPayloadSupported = false;
+    return requestJson<ProductAnalysisResponse>(
+      "/api/v1/scan-extracted",
+      {
+        method: "POST",
+        body: JSON.stringify(toLegacyExtractedPayload(requestPayload)),
+      },
+      isProductAnalysisResponse,
+    );
+  }
 }
 
 export function submitFeedback(
@@ -95,7 +115,7 @@ async function parseApiError(response: Response): Promise<ApiError> {
       message = body.detail.message;
     } else if (isPydanticErrorBody(body)) {
       code = "validation_error";
-      message = "The backend rejected the request payload.";
+      message = "The page details changed while the scan was starting.";
     }
   } catch {
     // Keep the generic HTTP status message when the body is not JSON.
@@ -125,6 +145,55 @@ function isPydanticErrorBody(value: unknown): value is { detail: unknown[] } {
       typeof value === "object" &&
       Array.isArray((value as { detail?: unknown }).detail),
   );
+}
+
+function shouldRetryLegacyExtractedPayload(
+  error: ApiError,
+  payload: ExtractedProductAnalysisPayload,
+): boolean {
+  return (
+    error.status === 422 &&
+    error.code === "validation_error" &&
+    (payload.target_market !== undefined || payload.product.units_bought_recent !== undefined)
+  );
+}
+
+function hasModernExtractedOnlyFields(payload: ExtractedProductAnalysisPayload): boolean {
+  return payload.target_market !== undefined || payload.product.units_bought_recent !== undefined;
+}
+
+async function backendSupportsModernExtractedPayload(): Promise<boolean> {
+  if (modernExtractedPayloadSupported !== null) {
+    return modernExtractedPayloadSupported;
+  }
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/v1/model-info`);
+    if (!response.ok) {
+      return true;
+    }
+    const body: unknown = await response.json();
+    modernExtractedPayloadSupported =
+      Boolean(body && typeof body === "object" && "market_reference" in body);
+    return modernExtractedPayloadSupported;
+  } catch {
+    return true;
+  }
+}
+
+export function toLegacyExtractedPayload(
+  payload: ExtractedProductAnalysisPayload,
+): ExtractedProductAnalysisPayload {
+  const legacyPayload: ExtractedProductAnalysisPayload = {
+    ...payload,
+    product: { ...payload.product },
+  };
+  delete legacyPayload.target_market;
+  delete legacyPayload.product.units_bought_recent;
+  return legacyPayload;
+}
+
+export function resetApiClientCompatibilityCacheForTests(): void {
+  modernExtractedPayloadSupported = null;
 }
 
 function isProductAnalysisResponse(value: unknown): value is ProductAnalysisResponse {

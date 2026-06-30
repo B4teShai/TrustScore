@@ -79,8 +79,19 @@ The response is a deterministic inference MVP result using preprocessing, rule-b
     "Price should be compared with similar products.",
     "Review sentiment is mixed."
   ],
-  "evidence": [],
-  "missing_inputs": ["market price reference"],
+  "evidence": [
+    {
+      "component": "price_safety",
+      "summary": "Price safety is scored only with a verified same-currency market reference.",
+      "evidence": [
+        "Listed price only: USD 29.99",
+        "No verified market reference found."
+      ],
+      "missing_inputs": [],
+      "confidence": 0
+    }
+  ],
+  "missing_inputs": [],
   "score_semantics": "TrustScore is normalized over non-feedback evidence.",
   "recommendation": "Check seller details, recent reviews, and return policy before buying.",
   "model_version": "0.3.0",

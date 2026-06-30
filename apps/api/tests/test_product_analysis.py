@@ -1,10 +1,20 @@
 from fastapi.testclient import TestClient
+import pytest
 
 from app.api import product_analysis as product_routes
 from app.main import app
 from app.page_fetching.fetcher import PageFetchError
 from app.schemas.product_analysis import ProductPageData, ReviewInput, SellerInfo
 from app.services.product_page_analysis import ProductPageAnalysis, ProductNotDetectedError
+
+
+@pytest.fixture(autouse=True)
+def _disable_live_market_reference(monkeypatch) -> None:
+    monkeypatch.setattr(product_routes, "enrich_market_reference", _no_market_reference)
+
+
+def _no_market_reference(product: ProductPageData, **_kwargs) -> tuple[ProductPageData, list[str]]:
+    return product, []
 
 
 def _expected_risk_level(score: int) -> str:
@@ -15,7 +25,7 @@ def _expected_risk_level(score: int) -> str:
     return "High Risk"
 
 
-def _analysis_for(url: str) -> ProductPageAnalysis:
+def _analysis_for(url: str, **_kwargs) -> ProductPageAnalysis:
     return ProductPageAnalysis(
         product=ProductPageData(
             url=url,
@@ -112,6 +122,57 @@ def test_scan_extracted_scores_active_tab_product_data() -> None:
     assert "extension_dom" in body["extraction_signals"]
     assert body["product"]["product_title"].startswith("Amazon Essentials")
     assert body["product"]["seller_name"] == "Amazon Essentials Store"
+    assert body["missing_inputs"] == ["visible review text"]
+    assert body["model_modes"]["price_safety"] == "not_scored_missing_market_reference"
+    evidence = {item["component"]: item for item in body["evidence"]}
+    assert "No verified market reference found." in evidence["price_safety"]["evidence"]
+
+
+def test_scan_extracted_uses_market_reference_when_serper_finds_comparables(monkeypatch) -> None:
+    client = TestClient(app)
+
+    def fake_market_reference(
+        product: ProductPageData,
+        **_kwargs,
+    ) -> tuple[ProductPageData, list[str]]:
+        return (
+            product.model_copy(
+                update={
+                    "average_market_price": 25.0,
+                    "market_reference_count": 12,
+                    "market_reference_source": "Serper",
+                }
+            ),
+            ["market_reference:serper:count=12"],
+        )
+
+    monkeypatch.setattr(product_routes, "enrich_market_reference", fake_market_reference)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "product": {
+                "url": "https://www.etsy.com/listing/1566610967/soccer-ball-engraved-glasses",
+                "site": "www.etsy.com",
+                "product_title": "Soccer Ball Engraved Glasses",
+                "price": 24.5,
+                "currency": "USD",
+                "seller": {"name": "GoalGiftShop", "rating": 4.9, "review_count": 1284},
+                "return_policy": "Returns accepted within 30 days.",
+                "reviews": [{"text": "Great engraving quality."}],
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    evidence = {item["component"]: item for item in body["evidence"]}
+    assert body["model_modes"]["price_safety"] != "not_scored_missing_market_reference"
+    assert "market_reference:serper:count=12" in body["extraction_signals"]
+    assert evidence["price_safety"]["evidence"] == [
+        "Listed price: USD 24.50",
+        "Market reference found from 12 comparable listings: USD 25.00 (Serper)",
+    ]
 
 
 def test_scan_extracted_sanitizes_messy_active_tab_preview() -> None:
@@ -139,14 +200,309 @@ def test_scan_extracted_sanitizes_messy_active_tab_preview() -> None:
     assert body["fetch_mode"] == "extension_dom"
     assert len(body["product"]["product_title"]) == 240
     assert body["product"]["product_image_url"] is None
-    assert len(body["product"]["currency"]) == 16
+    assert body["product"]["currency"] == "JPY"
     assert len(body["product"]["seller_name"]) == 160
+
+
+def test_scan_extracted_tolerates_extra_browser_fields_and_bad_optional_ratings() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "target_market": "US",
+            "unexpected_top_level": "ignored",
+            "product": {
+                "url": "https://www.ebay.com/itm/188272417479",
+                "site": "www.ebay.com",
+                "product_title": "Wireless Charging Pad",
+                "price": 19.99,
+                "currency": "USD",
+                "seller": {
+                    "name": "trusted_audio_shop",
+                    "rating": 98.8,
+                    "review_count": 12345,
+                    "raw_feedback": "98.8% positive feedback",
+                },
+                "rating": 98.8,
+                "review_count": 120,
+                "reviews": [
+                    {
+                        "text": "Works well.",
+                        "rating": 98.8,
+                        "raw_node_id": "review-1",
+                    }
+                ],
+                "units_bought_recent": 250,
+                "browser_only_field": "ignored",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    evidence = {item["component"]: item for item in body["evidence"]}
+    assert body["product"]["seller_name"] == "trusted_audio_shop"
+    assert "Seller rating" not in " ".join(evidence["seller_reliability"]["evidence"])
+    assert evidence["review_authenticity"]["evidence"][0].startswith("1 visible reviews")
+
+
+def test_scan_extracted_cleans_noisy_policy_and_review_boilerplate() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "product": {
+                "url": "https://www.amazon.com/dp/B0TEST1234",
+                "site": "www.amazon.com",
+                "product_title": "Natural Burlap Placemats",
+                "price": 39.99,
+                "currency": "USD",
+                "seller": {"name": "Example Store"},
+                "return_policy": (
+                    "Hello, sign in Account & Lists Returns & Orders 0 Cart All Today's Deals"
+                ),
+                "reviews": [
+                    {
+                        "text": (
+                            "Brief content visible, double tap to read full content. "
+                            "Full content visible, double tap to read brief content. "
+                            "Very high quality and durable outside. Read more Read less"
+                        )
+                    }
+                ],
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    evidence = {item["component"]: item for item in body["evidence"]}
+    assert evidence["review_authenticity"]["evidence"][0].startswith("1 visible reviews")
+    assert evidence["return_policy_clarity"]["evidence"] == [
+        "Return policy not visible on this page."
+    ]
+    assert evidence["return_policy_clarity"]["missing_inputs"] == []
+    assert body["missing_inputs"] == []
+
+
+def test_scan_extracted_ignores_localized_marketplace_currency() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "target_market": "US",
+            "product": {
+                "url": "https://www.amazon.com/dp/B0GXVNG3TR",
+                "site": "www.amazon.com",
+                "product_title": "Natural Burlap Placemats",
+                "price": 164690.19,
+                "currency": "MNT",
+                "seller": {"name": "Example Store"},
+                "rating": 4.5,
+                "review_count": 18,
+                "reviews": [{"text": "Very high quality and durable outside."}],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    evidence = {item["component"]: item for item in body["evidence"]}
+    assert body["product"]["price"] is None
+    assert body["product"]["currency"] is None
+    assert "price_ignored_localized_currency:MNT" in body["extraction_signals"]
+    assert evidence["price_safety"]["evidence"] == [
+        "Price not used: localized marketplace currency (MNT)"
+    ]
+    assert body["model_modes"]["price_safety"] == "not_scored_localized_currency:MNT"
+    assert "product price" not in body["missing_inputs"]
+
+
+def test_scan_extracted_does_not_show_market_reference_after_ignored_price(monkeypatch) -> None:
+    client = TestClient(app)
+
+    def fake_market_reference(
+        product: ProductPageData,
+        **kwargs,
+    ) -> tuple[ProductPageData, list[str]]:
+        assert kwargs.get("allow_without_listed_price") is not True
+        assert product.price is None
+        return (
+            product.model_copy(
+                update={
+                    "average_market_price": 27.05,
+                    "currency": "USD",
+                    "market_reference_count": 12,
+                    "market_reference_source": "Serper",
+                }
+            ),
+            ["market_reference:serper:count=12"],
+        )
+
+    monkeypatch.setattr(product_routes, "enrich_market_reference", fake_market_reference)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "target_market": "US",
+            "product": {
+                "url": "https://www.amazon.com/dp/B0GXVNG3TR",
+                "site": "www.amazon.com",
+                "product_title": "Natural Burlap Placemats",
+                "price": 164690.19,
+                "currency": "MNT",
+                "seller": {"name": "Example Store"},
+                "reviews": [{"text": "Very high quality and durable outside."}],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    evidence = {item["component"]: item for item in body["evidence"]}
+    assert evidence["price_safety"]["evidence"] == [
+        "Price not used: localized marketplace currency (MNT)"
+    ]
+    assert body["model_modes"]["price_safety"] == "not_scored_localized_currency:MNT"
+
+
+def test_scan_extracted_keeps_same_market_jpy_price_without_market_reference() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "product": {
+                "url": "https://www.amazon.co.jp/dp/B0TESTJP12",
+                "site": "www.amazon.co.jp",
+                "product_title": "Japanese Snack Box",
+                "price": 2659,
+                "currency": "JPY",
+                "seller": {"name": "Example Japan Store"},
+                "rating": 4.5,
+                "review_count": 18,
+                "reviews": [{"text": "Fresh snacks and fast delivery."}],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    evidence = {item["component"]: item for item in body["evidence"]}
+    assert body["product"]["price"] == 2659
+    assert body["product"]["currency"] == "JPY"
+    assert body["model_modes"]["price_safety"] == "not_scored_missing_market_reference"
+    assert evidence["price_safety"]["evidence"] == [
+        "Listed price only: JPY 2,659",
+        "No verified market reference found.",
+    ]
+    assert evidence["price_safety"]["missing_inputs"] == [
+        "verified same-currency market reference"
+    ]
+    assert "product price" not in body["missing_inputs"]
+
+
+def test_scan_extracted_keeps_supported_jpy_price_on_amazon_us() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "target_market": "US",
+            "product": {
+                "url": "https://www.amazon.com/dp/B0TESTUSJP",
+                "site": "www.amazon.com",
+                "product_title": "Straight Leg Jeans for Women",
+                "price": 5682,
+                "currency": "JPY",
+                "seller": {"name": "Mars power"},
+                "rating": 4.3,
+                "review_count": 1037,
+                "reviews": [{"text": "Comfortable fit and stretchy denim."}],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    evidence = {item["component"]: item for item in body["evidence"]}
+    assert body["product"]["price"] == 5682
+    assert body["product"]["currency"] == "JPY"
+    assert "price_ignored_localized_currency:JPY" not in body["extraction_signals"]
+    assert evidence["price_safety"]["evidence"] == [
+        "Listed price only: JPY 5,682",
+        "No verified market reference found.",
+    ]
+    assert evidence["price_safety"]["missing_inputs"] == [
+        "verified same-currency market reference"
+    ]
+    assert body["model_modes"]["price_safety"] == "not_scored_missing_market_reference"
+
+
+def test_scan_extracted_scores_supported_jpy_with_jpy_market_reference(monkeypatch) -> None:
+    client = TestClient(app)
+
+    def fake_market_reference(
+        product: ProductPageData,
+        **_kwargs,
+    ) -> tuple[ProductPageData, list[str]]:
+        return (
+            product.model_copy(
+                update={
+                    "average_market_price": 5900,
+                    "currency": "JPY",
+                    "market_reference_count": 3,
+                    "market_reference_source": "Serper",
+                    "market_reference_original_currency": "USD",
+                    "market_reference_exchange_rate": 156,
+                    "market_reference_exchange_rate_source": "Frankfurter",
+                    "market_reference_exchange_rate_date": "2026-06-30",
+                }
+            ),
+            ["market_reference:serper:count=3"],
+        )
+
+    monkeypatch.setattr(product_routes, "enrich_market_reference", fake_market_reference)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "target_market": "US",
+            "product": {
+                "url": "https://www.amazon.com/dp/B0TESTUSJP",
+                "site": "www.amazon.com",
+                "product_title": "Straight Leg Jeans for Women",
+                "price": 5682,
+                "currency": "JPY",
+                "seller": {"name": "Mars power"},
+                "rating": 4.3,
+                "review_count": 1037,
+                "reviews": [{"text": "Comfortable fit and stretchy denim."}],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    evidence = {item["component"]: item for item in body["evidence"]}
+    assert body["product"]["price"] == 5682
+    assert body["product"]["currency"] == "JPY"
+    assert body["model_modes"]["price_safety"] != "not_scored_missing_market_reference"
+    assert evidence["price_safety"]["evidence"] == [
+        "Listed price: JPY 5,682",
+        "Market reference found from 3 comparable listings: JPY 5,900 (Serper)",
+        "Converted market reference from USD: 1 USD = JPY 156 (Frankfurter, 2026-06-30)",
+    ]
+    assert evidence["price_safety"]["missing_inputs"] == []
 
 
 def test_scan_returns_product_not_detected(monkeypatch) -> None:
     client = TestClient(app)
 
-    def missing_product(_url: str) -> ProductPageAnalysis:
+    def missing_product(_url: str, **_kwargs) -> ProductPageAnalysis:
         raise ProductNotDetectedError("No product signals found.")
 
     monkeypatch.setattr(product_routes, "analyze_product_url", missing_product)
@@ -160,7 +516,7 @@ def test_scan_returns_product_not_detected(monkeypatch) -> None:
 def test_scan_returns_product_page_unavailable(monkeypatch) -> None:
     client = TestClient(app)
 
-    def unavailable(_url: str) -> ProductPageAnalysis:
+    def unavailable(_url: str, **_kwargs) -> ProductPageAnalysis:
         raise PageFetchError("Request failed.")
 
     monkeypatch.setattr(product_routes, "analyze_product_url", unavailable)
@@ -225,6 +581,8 @@ def test_model_info_returns_runtime_configuration() -> None:
     assert body["model_version"] == "0.3.0"
     assert "trustscore_weights" in body
     assert body["feedback_scoring"] == "not_applied"
+    assert body["market_reference"]["provider"] == "serper"
+    assert "api_key" not in body["market_reference"]
     assert body["fake_review_artifact_status"] in {"loaded", "missing_or_unavailable"}
     assert set(body["risk_model_artifact_status"]) == {"seller", "price", "policy"}
 

@@ -12,6 +12,15 @@ from app.schemas.product_analysis import ReviewInput
 
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"\s+")
+REVIEW_BOILERPLATE_RE = re.compile(
+    r"("
+    r"brief content visible,\s*double tap to read full content\.?|"
+    r"full content visible,\s*double tap to read brief content\.?|"
+    r"read more\s+read less|"
+    r"the media could not be loaded\.?"
+    r")",
+    re.I,
+)
 NEGATIVE_KEYWORDS = (
     "fake",
     "broken",
@@ -66,7 +75,8 @@ class ReviewFeatures:
 def clean_review_text(value: str) -> str:
     """Normalize review text without changing its underlying meaning."""
     without_html = HTML_TAG_RE.sub(" ", html.unescape(value))
-    return WHITESPACE_RE.sub(" ", without_html).strip().lower()
+    without_ui_copy = REVIEW_BOILERPLATE_RE.sub(" ", without_html)
+    return WHITESPACE_RE.sub(" ", without_ui_copy).strip().lower()
 
 
 def _keyword_signal(text: str) -> int:

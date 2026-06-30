@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, analyzeExtractedProduct, analyzeProduct } from "./apiClient";
+import {
+  ApiError,
+  analyzeExtractedProduct,
+  analyzeProduct,
+  resetApiClientCompatibilityCacheForTests,
+  toLegacyExtractedPayload,
+} from "./apiClient";
 import type { ProductAnalysisResponse } from "./types";
 
 const productResponse: ProductAnalysisResponse = {
@@ -31,7 +37,7 @@ const productResponse: ProductAnalysisResponse = {
       confidence: 0.8,
     },
   ],
-  missing_inputs: ["market price reference"],
+  missing_inputs: [],
   score_semantics: "TrustScore is normalized over active non-feedback weights.",
   recommendation: "Check seller details before buying.",
   model_version: "0.3.0",
@@ -61,6 +67,7 @@ const productResponse: ProductAnalysisResponse = {
 
 describe("apiClient", () => {
   afterEach(() => {
+    resetApiClientCompatibilityCacheForTests();
     vi.unstubAllGlobals();
   });
 
@@ -103,7 +110,97 @@ describe("apiClient", () => {
     );
   });
 
-  it("accepts FastAPI nulls for missing optional product metadata", async () => {
+  it("uses a legacy active-tab payload when model-info identifies an older API", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { model_version: "1.0.0" }))
+      .mockResolvedValueOnce(jsonResponse(200, productResponse));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeExtractedProduct({
+      target_market: "US",
+      product: {
+        url: "https://example.com/product/123",
+        site: "example.com",
+        product_title: "Wireless Headphones",
+        reviews: [],
+        units_bought_recent: 1000,
+      },
+    });
+
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string) as {
+      product: Record<string, unknown>;
+      target_market?: string;
+    };
+
+    expect(result.scan_id).toBe(productResponse.scan_id);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8000/api/v1/model-info");
+    expect(secondBody.target_market).toBeUndefined();
+    expect(secondBody.product.units_bought_recent).toBeUndefined();
+  });
+
+  it("retries active-tab scans with a legacy payload when validation still rejects new fields", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { market_reference: { active: true } }))
+      .mockResolvedValueOnce(
+        jsonResponse(422, {
+          detail: [
+            {
+              type: "extra_forbidden",
+              loc: ["body", "target_market"],
+              msg: "Extra inputs are not permitted",
+              input: "US",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, productResponse));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeExtractedProduct({
+      target_market: "US",
+      product: {
+        url: "https://example.com/product/123",
+        site: "example.com",
+        product_title: "Wireless Headphones",
+        reviews: [],
+        units_bought_recent: 1000,
+      },
+    });
+
+    const firstBody = JSON.parse(fetchMock.mock.calls[1][1].body as string) as Record<string, unknown>;
+    const secondBody = JSON.parse(fetchMock.mock.calls[2][1].body as string) as {
+      product: Record<string, unknown>;
+      target_market?: string;
+    };
+
+    expect(result.scan_id).toBe(productResponse.scan_id);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(firstBody.target_market).toBe("US");
+    expect(secondBody.target_market).toBeUndefined();
+    expect(secondBody.product.units_bought_recent).toBeUndefined();
+  });
+
+  it("creates legacy-safe active-tab payloads", () => {
+    const payload = toLegacyExtractedPayload({
+      target_market: "US",
+      locale: "en-US",
+      product: {
+        url: "https://example.com/product/123",
+        product_title: "Wireless Headphones",
+        reviews: [],
+        units_bought_recent: 1000,
+      },
+    });
+
+    expect(payload.target_market).toBeUndefined();
+    expect(payload.locale).toBe("en-US");
+    expect(payload.product.units_bought_recent).toBeUndefined();
+  });
+
+  it("accepts nulls for missing optional product metadata", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(200, {
         ...productResponse,
