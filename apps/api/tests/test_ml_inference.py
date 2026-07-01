@@ -3,7 +3,7 @@ from pathlib import Path
 
 from app.ml.fake_review_service import FakeReviewService
 from app.ml.preprocessing import clean_review_text, extract_review_features
-from app.ml.risk_service import RiskModelService
+from app.ml.risk_service import RiskModelService, _score_price_rules, _score_price_v3
 from app.schemas.product_analysis import ProductPageData, ReviewInput
 from app.services.trustscore_engine import calculate_trustscore, classify_risk, top_reasons
 from app.schemas.product_analysis import ComponentScores
@@ -121,6 +121,48 @@ def test_rule_based_risk_scores_handle_missing_and_market_price() -> None:
     assert missing.policy_mode == "rule_fallback"
     assert priced.price_safety == 35
     assert priced.return_policy_clarity >= 80
+
+
+def test_genuine_sale_is_not_flagged_as_price_anomaly() -> None:
+    # Sale price is well below market, but the regular (list) price is market
+    # consistent -> a legitimate discount should score as fair, not suspicious.
+    on_sale = _score_price_v3(
+        ProductPageData(
+            url="https://example.com/product/sale",
+            product_title="Discounted Product",
+            price=20,
+            list_price=55,
+            average_market_price=50,
+            reviews=[],
+        )
+    )
+    scam = _score_price_v3(
+        ProductPageData(
+            url="https://example.com/product/scam",
+            product_title="Suspiciously Cheap Product",
+            price=20,
+            average_market_price=50,
+            reviews=[],
+        )
+    )
+    fake_strike = _score_price_v3(
+        ProductPageData(
+            url="https://example.com/product/fake",
+            product_title="Fake Inflated Strikethrough",
+            price=20,
+            list_price=200,
+            average_market_price=50,
+            reviews=[],
+        )
+    )
+
+    assert on_sale[0] == 90  # fair band via the regular price
+    assert scam[0] == 45  # no corroborating list price -> flagged
+    assert fake_strike[0] == 45  # implausible list price -> falls back to sale price
+
+    # Rule-based fallback path applies the same reference.
+    assert _score_price_rules(20, 50, 55)[0] == 90
+    assert _score_price_rules(20, 50, None)[0] == 35
 
 
 def test_marketplace_popularity_lifts_seller_reliability_without_seller_fields() -> None:

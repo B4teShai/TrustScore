@@ -37,6 +37,7 @@ export type ExtractedProductPayload = {
   description?: string;
   product_image_url?: string;
   price?: number;
+  list_price?: number;
   currency?: string;
   average_market_price?: number;
   seller?: SellerInfo;

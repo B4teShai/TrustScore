@@ -29,6 +29,10 @@ bullet slide, or the detailed version for speaker notes.
   with a small 5% weight; it moves the score slightly, but rescanning alone never does.
 - **"What we read" panel.** The popup now shows the actual reviews, seller, price, rating, and
   return policy it collected — so the score is transparent, not a black box.
+- **Sale-aware price check.** Reads the original ("was") price too. A genuine discount is scored
+  against the regular price, so real deals aren't flagged as fraud; evidence shows `On sale: $X
+  (was $Y)`. A cheap listing with no real original price stays flagged. Missing market prices
+  (Serper returns no/too-few comparables) simply leave price safety unscored instead of guessing.
 
 ---
 

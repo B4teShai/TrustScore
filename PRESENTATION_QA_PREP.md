@@ -72,6 +72,28 @@ Collecting real labeled ground truth for this is explicitly called out as future
 
 ---
 
+### Q: "A product on a big sale is cheap on purpose — doesn't your price check flag every deal as a scam?"
+
+**Answer:** "No — the scorer is sale-aware. We also read the original / strikethrough ('was')
+price from the page. When an item is on sale, we compare the item's **regular** price to the
+market reference, not the discounted price. So a legitimate $20-now-was-$55 deal on a $50-market
+product scores as fair (90) and the evidence literally says `On sale: $20 (was $55)`. A listing
+that is just cheap with no original price — or one that fakes an inflated strikethrough — falls
+back to the current price and is still flagged as a suspicious anomaly. That keeps real discounts
+from being punished while still catching bait pricing."
+
+---
+
+### Q: "What if Serper returns a listing with no price, or you can't find enough comparables?"
+
+**Answer:** "Comparable listings that have a missing or unparseable price are simply skipped when
+we compute the market reference. If fewer than three valid comparables survive, we treat the
+market reference as unavailable — price safety is not scored at all (the trace says so) rather
+than us inventing a number. Because the final score divides by the sum of **active** weights,
+dropping price safety doesn't distort the other components."
+
+---
+
 ### Q: "Is it 0.989 or 0.9889 ROC-AUC? Your slides use both."
 
 **Answer:** "0.9889 — some places round it to three decimals for readability, same number."

@@ -129,6 +129,16 @@ class ProductPageData(StrictBaseModel):
         examples=["https://example.com/product-image.jpg"],
     )
     price: float | None = Field(default=None, ge=0, examples=[29.99])
+    list_price: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Original / strikethrough (\"was\") price when the item is on sale. Used to "
+            "score price fairness against the regular price so genuine discounts are not "
+            "treated as suspicious anomalies."
+        ),
+        examples=[99.99],
+    )
     currency: str | None = Field(default=None, max_length=16, examples=["USD"])
     average_market_price: float | None = Field(default=None, gt=0, examples=[59.99])
     market_reference_count: int | None = Field(default=None, ge=0, examples=[12])
@@ -211,6 +221,7 @@ class ExtractedProductData(LenientBaseModel):
     description: str | None = Field(default=None, max_length=4000)
     product_image_url: str | None = Field(default=None, max_length=4096)
     price: float | None = Field(default=None, ge=0)
+    list_price: float | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, max_length=64)
     average_market_price: float | None = Field(default=None, gt=0)
     seller: ExtractedSellerInfo | None = None
