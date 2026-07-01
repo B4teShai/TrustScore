@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import ipaddress
 import re
@@ -123,6 +123,7 @@ class PriceExtraction:
     price: float | None
     currency: str | None
     ignored_currency: str | None = None
+    list_price: float | None = None
 
 
 GENERIC_PROFILE = MarketplaceProfile(
@@ -500,6 +501,7 @@ def extract_product_page(
         description=_extract_description(soup, product_objects, profile),
         product_image_url=_extract_image(soup, url, product_objects, profile),
         price=price_result.price,
+        list_price=price_result.list_price,
         currency=price_result.currency,
         average_market_price=None,
         seller=seller,
@@ -675,7 +677,85 @@ def _extract_price_and_currency(
     if price is not None:
         candidates.append((price, parsed_currency))
 
-    return _select_price_candidate(candidates, expected_currency=expected_currency, url=url)
+    result = _select_price_candidate(candidates, expected_currency=expected_currency, url=url)
+    if result.price is None:
+        return result
+    list_price = _extract_list_price(
+        soup,
+        products,
+        profile,
+        current_price=result.price,
+        currency=result.currency,
+    )
+    if list_price is None:
+        return result
+    return replace(result, list_price=list_price)
+
+
+# Original / strikethrough ("was") price selectors, kept separate from the buybox
+# price selectors so a strikethrough never wins the current-price selection.
+_LIST_PRICE_SELECTORS: dict[str, tuple[str, ...]] = {
+    "site_amazon": (
+        ".basisPrice .a-offscreen",
+        ".a-price.a-text-price .a-offscreen",
+        "[data-a-strike='true'] .a-offscreen",
+        "#listPrice",
+        "#priceblock_listprice",
+    ),
+    "generic": (
+        "del .a-offscreen",
+        "del",
+        "s",
+        "[class*='strike'] .a-offscreen",
+        "[class*='strike']",
+        "[class*='was-price']",
+        "[class*='list-price']",
+    ),
+}
+
+
+def _extract_list_price(
+    soup: BeautifulSoup,
+    products: list[dict[str, Any]],
+    profile: MarketplaceProfile,
+    *,
+    current_price: float,
+    currency: str | None,
+) -> float | None:
+    """Extract the original (strikethrough) price when the item is on sale.
+
+    Only returns a value that is a genuine same-currency discount, i.e. strictly
+    greater than the selected current price. Anything else is treated as noise.
+    """
+    candidates: list[float] = []
+
+    for product in products:
+        for offer in _as_list(product.get("offers")):
+            if not isinstance(offer, dict):
+                continue
+            for key in ("highPrice", "listPrice"):
+                amount = _parse_float(offer.get(key))
+                if amount is not None:
+                    candidates.append(amount)
+
+    selectors: tuple[str, ...] = _LIST_PRICE_SELECTORS["generic"]
+    if profile.site_signal == "site_amazon":
+        selectors = (*_LIST_PRICE_SELECTORS["site_amazon"], *selectors)
+    for selector in selectors:
+        for element in soup.select(selector):
+            amount, amount_currency = _parse_price_text(
+                _element_text(element), allow_without_currency=True
+            )
+            if amount is None:
+                continue
+            if amount_currency and currency and amount_currency != currency:
+                continue
+            candidates.append(amount)
+
+    discounts = [amount for amount in candidates if amount > current_price]
+    if not discounts:
+        return None
+    return min(discounts)
 
 
 def _split_price_texts(soup: BeautifulSoup) -> list[str]:

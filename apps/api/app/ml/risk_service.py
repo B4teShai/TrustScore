@@ -180,7 +180,9 @@ class RiskModelService:
                 score = _score_label_model(model, text, label_scores)
                 if score is not None:
                     return score, 0.75, "artifact"
-        score, completeness = _score_price_rules(payload.price, payload.average_market_price)
+        score, completeness = _score_price_rules(
+            payload.price, payload.average_market_price, payload.list_price
+        )
         return score, completeness, "rule_fallback"
 
     def _score_policy(self, payload: ProductPageData) -> tuple[int, float, str]:
@@ -310,16 +312,41 @@ def _popularity_signal(payload: ProductPageData) -> tuple[float, float] | None:
     return score, min(0.6, completeness)
 
 
+def _price_reference(
+    price: float,
+    list_price: float | None,
+    average_market_price: float,
+) -> float:
+    """Price to compare against the market median for fairness.
+
+    When an item is on sale (a strikethrough / original price above the current
+    price), a genuine discount would otherwise read as a suspicious anomaly. If
+    the product's regular (list) price is itself market-consistent, score the
+    fairness ratio against that regular price so real sales are not penalized.
+    A missing list price, or one whose ratio to market is itself implausible
+    (e.g. a fake-inflated strikethrough), falls back to the current price so
+    scam listings stay flagged.
+    """
+    if list_price is None or list_price <= price:
+        return price
+    list_ratio = list_price / average_market_price
+    if 0.60 <= list_ratio <= 1.40:
+        return list_price
+    return price
+
+
 def _score_price_rules(
     price: float | None,
     average_market_price: float | None,
+    list_price: float | None = None,
 ) -> tuple[int, float]:
     if price is None:
         return 50, 0.0
     if average_market_price is None or average_market_price <= 0:
         return 50, 0.45
 
-    ratio = price / average_market_price
+    reference = _price_reference(price, list_price, average_market_price)
+    ratio = reference / average_market_price
     if ratio < 0.50:
         return 35, 1.0
     if ratio < 0.75:
@@ -336,7 +363,10 @@ def _score_price_v3(payload: ProductPageData) -> tuple[int, float, str]:
     if payload.average_market_price is None or payload.average_market_price <= 0:
         return 50, 0.45, "v3_missing_market_reference"
 
-    ratio = payload.price / payload.average_market_price
+    reference = _price_reference(
+        payload.price, payload.list_price, payload.average_market_price
+    )
+    ratio = reference / payload.average_market_price
     if ratio < 0.35:
         return 25, 1.0, "v3_price_ratio_anomaly"
     if ratio < 0.60:
