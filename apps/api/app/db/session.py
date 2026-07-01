@@ -27,7 +27,14 @@ def get_engine() -> Any | None:
         )
         return None
 
-    return create_engine(settings.database_url, pool_pre_ping=True)
+    try:
+        return create_engine(settings.database_url, pool_pre_ping=True)
+    except Exception as exc:
+        logger.warning(
+            "database_engine_unavailable",
+            extra={"error_type": type(exc).__name__},
+        )
+        return None
 
 
 def database_enabled() -> bool:
