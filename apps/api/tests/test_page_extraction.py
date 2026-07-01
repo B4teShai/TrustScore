@@ -825,3 +825,47 @@ def test_analyze_product_url_reports_both_static_and_render_failures(monkeypatch
 
     with pytest.raises(PageFetchError, match="Static fetch failed"):
         page_service.analyze_product_url("https://example.com/product/charger")
+
+
+def test_extract_product_page_captures_strikethrough_list_price() -> None:
+    html = """
+    <html>
+      <body>
+        <h1 id="productTitle">Wireless Noise Cancelling Headphones</h1>
+        <div id="corePriceDisplay_desktop_feature_div">
+          <span class="a-price"><span class="a-offscreen">$49.99</span></span>
+          <span class="a-price a-text-price"><span class="a-offscreen">$99.99</span></span>
+        </div>
+        <button>Add to cart</button>
+        <p>This item is eligible for free returns within 30 days of delivery.</p>
+      </body>
+    </html>
+    """
+
+    result = extract_product_page(html, "https://www.amazon.com/dp/B0TEST9999")
+
+    assert result.detected is True
+    assert result.product is not None
+    assert result.product.price == 49.99
+    assert result.product.list_price == 99.99
+
+
+def test_extract_product_page_ignores_list_price_when_not_a_discount() -> None:
+    html = """
+    <html>
+      <body>
+        <h1 id="productTitle">Wireless Noise Cancelling Headphones</h1>
+        <div id="corePriceDisplay_desktop_feature_div">
+          <span class="a-price"><span class="a-offscreen">$49.99</span></span>
+        </div>
+        <button>Add to cart</button>
+      </body>
+    </html>
+    """
+
+    result = extract_product_page(html, "https://www.amazon.com/dp/B0TEST9998")
+
+    assert result.detected is True
+    assert result.product is not None
+    assert result.product.price == 49.99
+    assert result.product.list_price is None

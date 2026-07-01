@@ -266,6 +266,7 @@ def _sanitize_extracted_product(
         }
     currency = normalize_currency_code(_truncate(product.currency, 16))
     price = product.price
+    list_price = product.list_price
     average_market_price = product.average_market_price
     extra_signals: list[str] = []
     if price is not None and not should_use_price_currency(
@@ -276,8 +277,12 @@ def _sanitize_extracted_product(
         if currency:
             extra_signals.append(f"price_ignored_localized_currency:{currency}")
         price = None
+        list_price = None
         currency = None
         average_market_price = None
+    # Only trust a list price that is a genuine same-currency discount.
+    if list_price is not None and (price is None or list_price <= price):
+        list_price = None
     elif price is not None and currency is None:
         currency = expected_currency
 
@@ -288,6 +293,7 @@ def _sanitize_extracted_product(
         description=_truncate(product.description, 1000),
         product_image_url=safe_image_url,
         price=price,
+        list_price=list_price,
         currency=currency,
         average_market_price=average_market_price,
         seller=seller,

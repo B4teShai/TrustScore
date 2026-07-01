@@ -410,11 +410,21 @@ def _component_evidence(
     market_reference_count = payload.market_reference_count or market_reference_count_from_signals(
         extraction_signals
     )
+    on_sale = (
+        payload.price is not None
+        and payload.list_price is not None
+        and payload.list_price > payload.price
+    )
     if payload.price is not None:
         if payload.average_market_price is not None:
             price_evidence.append(f"Listed price: {_money(payload.price, payload.currency)}")
         else:
             price_evidence.append(f"Listed price only: {_money(payload.price, payload.currency)}")
+        if on_sale:
+            price_evidence.append(
+                f"On sale: {_money(payload.price, payload.currency)} "
+                f"(was {_money(payload.list_price, payload.currency)})"
+            )
     else:
         if ignored_currency:
             price_evidence.append(f"Price not used: localized marketplace currency ({ignored_currency})")

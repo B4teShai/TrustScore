@@ -181,6 +181,52 @@ def test_scan_extracted_uses_market_reference_when_serper_finds_comparables(monk
     ]
 
 
+def test_scan_extracted_treats_genuine_sale_as_fair_price(monkeypatch) -> None:
+    client = TestClient(app)
+
+    def fake_market_reference(
+        product: ProductPageData,
+        **_kwargs,
+    ) -> tuple[ProductPageData, list[str]]:
+        return (
+            product.model_copy(
+                update={
+                    "average_market_price": 50.0,
+                    "market_reference_count": 8,
+                    "market_reference_source": "Serper",
+                }
+            ),
+            ["market_reference:serper:count=8"],
+        )
+
+    monkeypatch.setattr(product_routes, "enrich_market_reference", fake_market_reference)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "product": {
+                "url": "https://www.amazon.com/dp/B0SALE0001",
+                "site": "www.amazon.com",
+                "product_title": "Wireless Headphones On Sale",
+                "price": 20.0,
+                "list_price": 55.0,
+                "currency": "USD",
+                "seller": {"name": "AudioShop", "rating": 4.8, "review_count": 900},
+                "return_policy": "Returns accepted within 30 days.",
+                "reviews": [{"text": "Great sound and battery."}],
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    evidence = {item["component"]: item for item in body["evidence"]}
+    # Regular price (USD 55) is market-consistent -> the sale must score as fair,
+    # not as a suspicious price anomaly.
+    assert body["component_scores"]["price_safety"] == 90
+    assert "On sale: USD 20.00 (was USD 55.00)" in evidence["price_safety"]["evidence"]
+
+
 def test_scan_extracted_sanitizes_messy_active_tab_preview() -> None:
     client = TestClient(app)
 

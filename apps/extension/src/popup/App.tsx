@@ -43,6 +43,7 @@ type ProductPreview = {
   sellerRating?: number;
   sellerReviewCount?: number;
   price?: number;
+  listPrice?: number;
   currency?: string;
   rating?: number;
   reviewCount?: number;
@@ -609,6 +610,12 @@ export function productPayloadFromPreview(page: CurrentPage): ExtractedProductPa
     page.host,
     page.targetMarket,
   );
+  const listPrice =
+    priceInfo.price !== undefined &&
+    preview.listPrice !== undefined &&
+    preview.listPrice > priceInfo.price
+      ? preview.listPrice
+      : undefined;
 
   const seller =
     preview.seller || preview.sellerRating !== undefined || preview.sellerReviewCount !== undefined
@@ -630,6 +637,7 @@ export function productPayloadFromPreview(page: CurrentPage): ExtractedProductPa
     description: limitText(preview.description, 4000),
     product_image_url: preview.imageUrl,
     price: priceInfo.price,
+    list_price: listPrice,
     currency: priceInfo.currency,
     seller,
     return_policy: limitText(preview.returnPolicy, 4000),
@@ -1343,6 +1351,22 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
     );
   }
 
+  function listPriceTextFromDom(): string | undefined {
+    return firstText([
+      ".basisPrice .a-offscreen",
+      ".a-price.a-text-price .a-offscreen",
+      "[data-a-strike='true'] .a-offscreen",
+      "#listPrice",
+      "#priceblock_listprice",
+      "del .a-offscreen",
+      "del",
+      "s[class*='price']",
+      "[class*='strike'] .a-offscreen",
+      "[class*='was-price']",
+      "[class*='list-price']",
+    ]);
+  }
+
   function amazonPriceTextFromDom(): string | undefined {
     return (
       firstText([
@@ -1522,6 +1546,7 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
   const imageUrl = imageFromDom() || absoluteUrl(attr("meta[property='og:image']", "content"));
   const seller = sellerFromDom();
   const priceInfo = priceFromText(priceTextFromDom());
+  const listPriceInfo = priceFromText(listPriceTextFromDom());
   const sellerFeedback = sellerFeedbackTextFromDom();
 
   const lang = compact(
@@ -1537,6 +1562,12 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
     sellerRating: sellerRatingFromPercent(sellerFeedback),
     sellerReviewCount: sellerReviewCountFromText(sellerFeedback),
     price: priceInfo.price,
+    listPrice:
+      priceInfo.price !== undefined &&
+      listPriceInfo.price !== undefined &&
+      listPriceInfo.price > priceInfo.price
+        ? listPriceInfo.price
+        : undefined,
     currency: priceInfo.currency || attr("meta[property='product:price:currency']", "content"),
     rating: numberFromText(ratingTextFromDom()),
     reviewCount: numberFromText(reviewCountTextFromDom()),

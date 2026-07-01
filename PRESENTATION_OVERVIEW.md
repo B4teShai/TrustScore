@@ -177,7 +177,12 @@ Every component returns a **score from 0 to 100**, where higher means safer or m
    served score path uses a leakage-safe market-ratio rule:
 
    ```
-   price_ratio = listed_price / average_market_price
+   # A genuine sale must not read as fraud. When the listing shows an original
+   # (strikethrough / "was") price and the item is on sale, the ratio is taken
+   # against the regular price if that regular price is itself market-consistent.
+   reference = list_price if (on_sale and 0.60 <= list_price/average_market_price <= 1.40)
+                          else listed_price
+   price_ratio = reference / average_market_price
 
    if price_ratio < 0.35: price_safety = 25   # extremely low, suspicious
    elif price_ratio < 0.60: price_safety = 45 # unusually low
@@ -186,8 +191,15 @@ Every component returns a **score from 0 to 100**, where higher means safer or m
    else: price_safety = 50                    # too high to trust automatically
    ```
 
-   If the market reference cannot be verified, the score trace says price was not scored instead
-   of pretending the listing is safe or unsafe.
+   **Sale-aware:** a deep but legitimate discount (e.g. $20 now, was $55, market $50) scores as
+   fair (90) rather than as a suspicious anomaly, and the evidence shows `On sale: $20 (was $55)`.
+   A listing that is merely cheap with no corroborating original price — or one with an
+   implausibly inflated strikethrough — still falls back to the current price and stays flagged.
+
+   The market reference comes from a live Serper Google-Shopping lookup. Comparable listings with
+   a missing or unparseable price are skipped; if fewer than 3 valid comparables survive, the
+   reference is treated as unavailable. When the market reference cannot be verified, the score
+   trace says price was not scored instead of pretending the listing is safe or unsafe.
 
 ### 3c. Active components and final formula
 
