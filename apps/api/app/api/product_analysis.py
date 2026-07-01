@@ -37,6 +37,22 @@ from app.services.product_scoring import build_trustscore
 router = APIRouter(prefix="/api", tags=["product analysis"])
 
 
+def _require_amazon_host(raw_url: str) -> None:
+    """Reject non-Amazon URLs; TrustScore supports Amazon product pages only."""
+    try:
+        host = (urlparse(raw_url).hostname or "").lower()
+    except ValueError:
+        host = ""
+    if "amazon." not in host:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "unsupported_site",
+                "message": "TrustScore currently supports Amazon product pages only.",
+            },
+        )
+
+
 @router.post("/analyze-product", response_model=ProductAnalysisResponse)
 def analyze_product(payload: ProductAnalysisRequest) -> ProductAnalysisResponse:
     """Deprecated compatibility alias for URL-only product analysis."""
@@ -52,6 +68,7 @@ def scan_product(payload: ProductAnalysisRequest) -> ProductAnalysisResponse:
 @router.post("/v1/scan-extracted", response_model=ProductAnalysisResponse)
 def scan_extracted_product(payload: ExtractedProductScanRequest) -> ProductAnalysisResponse:
     """Score active-tab product fields when server-side fetching is blocked."""
+    _require_amazon_host(payload.product.url)
     try:
         product, extra_signals = _sanitize_extracted_product(
             payload.product,
@@ -146,7 +163,11 @@ def model_info() -> dict[str, object]:
             "price_safety": settings.trust_weight_price,
             "user_feedback_history": settings.trust_weight_feedback,
         },
-        "feedback_scoring": "not_applied",
+        "feedback_scoring": (
+            "applied_small_weight_when_feedback_present"
+            if settings.trust_weight_feedback > 0
+            else "not_applied"
+        ),
         "ai_feedback": {
             "active": settings.ai_feedback_active,
             "model": settings.anthropic_model if settings.ai_feedback_active else None,
@@ -169,6 +190,7 @@ def model_info() -> dict[str, object]:
 
 
 def _analyze_product_url(payload: ProductAnalysisRequest) -> ProductAnalysisResponse:
+    _require_amazon_host(payload.url)
     try:
         analysis = analyze_product_url(
             payload.url,
@@ -274,7 +296,14 @@ def _sanitize_extracted_product(
         rating=_rating_or_none(product.rating),
         review_count=product.review_count,
         units_bought_recent=product.units_bought_recent,
+        feedback_score=_feedback_score_or_none(product.feedback_score),
     ), extra_signals
+
+
+def _feedback_score_or_none(value: int | None) -> int | None:
+    if value is None:
+        return None
+    return max(0, min(100, value))
 
 
 def _validate_public_reference_url(raw_url: str) -> str:

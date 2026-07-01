@@ -191,7 +191,7 @@ class Settings:
     trust_weight_sentiment: float = _get_float("TRUST_WEIGHT_SENTIMENT", 0.20)
     trust_weight_policy: float = _get_float("TRUST_WEIGHT_POLICY", 0.15)
     trust_weight_price: float = _get_float("TRUST_WEIGHT_PRICE", 0.10)
-    trust_weight_feedback: float = _get_float("TRUST_WEIGHT_FEEDBACK", 0.0)
+    trust_weight_feedback: float = _get_float("TRUST_WEIGHT_FEEDBACK", 0.05)
 
     @property
     def model_version_tag(self) -> str:

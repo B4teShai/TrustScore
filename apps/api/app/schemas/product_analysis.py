@@ -164,6 +164,16 @@ class ProductPageData(StrictBaseModel):
         description="Recent purchase volume from a marketplace badge (e.g. '8K+ bought in past month').",
         examples=[8000],
     )
+    feedback_score: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description=(
+            "Prior user-feedback history for this product (0-100). When present it is "
+            "applied to the TrustScore with a small weight; absent leaves feedback unscored."
+        ),
+        examples=[75],
+    )
 
 
 class ExtractedSellerInfo(LenientBaseModel):
@@ -209,6 +219,7 @@ class ExtractedProductData(LenientBaseModel):
     rating: float | None = Field(default=None, ge=0)
     review_count: int | None = Field(default=None, ge=0)
     units_bought_recent: int | None = Field(default=None, ge=0)
+    feedback_score: int | None = Field(default=None, ge=0, le=100)
 
 
 class ExtractedProductScanRequest(LenientBaseModel):

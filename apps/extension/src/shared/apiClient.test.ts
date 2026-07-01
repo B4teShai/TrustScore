@@ -3,13 +3,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   analyzeExtractedProduct,
-  analyzeProduct,
   resetApiClientCompatibilityCacheForTests,
   toLegacyExtractedPayload,
 } from "./apiClient";
-import type { ProductAnalysisResponse } from "./types";
+import type { ExtractedProductAnalysisPayload, ProductAnalysisResponse } from "./types";
 
 const API_BASE_URL = "https://walrus-app-38mjb.ondigitalocean.app";
+
+const extractedPayload: ExtractedProductAnalysisPayload = {
+  product: {
+    url: "https://www.amazon.com/dp/B0ABCDEF12",
+    site: "amazon.com",
+    product_title: "Wireless Headphones",
+    reviews: [],
+  },
+};
 
 const productResponse: ProductAnalysisResponse = {
   scan_id: "11111111-1111-4111-8111-111111111111",
@@ -73,23 +81,7 @@ describe("apiClient", () => {
     vi.unstubAllGlobals();
   });
 
-  it("posts scans to the canonical v1 route", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, productResponse));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const result = await analyzeProduct({ url: "https://example.com/product/123" });
-
-    expect(result.scan_id).toBe(productResponse.scan_id);
-    expect(fetchMock).toHaveBeenCalledWith(
-      `${API_BASE_URL}/api/v1/scan`,
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ url: "https://example.com/product/123" }),
-      }),
-    );
-  });
-
-  it("posts active-tab fallback scans to the extracted product route", async () => {
+  it("posts active-tab scans to the extracted product route", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, productResponse));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -215,7 +207,7 @@ describe("apiClient", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await analyzeProduct({ url: "https://next.mn/mn/product/gc-q257cafv" });
+    const result = await analyzeExtractedProduct(extractedPayload);
 
     expect(result.product.seller_name).toBeNull();
   });
@@ -233,7 +225,7 @@ describe("apiClient", () => {
       ),
     );
 
-    await expect(analyzeProduct({ url: "https://example.com/about" })).rejects.toMatchObject({
+    await expect(analyzeExtractedProduct(extractedPayload)).rejects.toMatchObject({
       code: "product_not_detected",
       message: "This page does not have enough product-detail signals.",
       status: 422,
@@ -243,7 +235,7 @@ describe("apiClient", () => {
   it("rejects invalid success payloads", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(200, { ok: true })));
 
-    await expect(analyzeProduct({ url: "https://example.com/product/123" })).rejects.toMatchObject({
+    await expect(analyzeExtractedProduct(extractedPayload)).rejects.toMatchObject({
       code: "invalid_response",
       status: 502,
     } satisfies Partial<ApiError>);
@@ -263,7 +255,7 @@ describe("apiClient", () => {
       ),
     );
 
-    await expect(analyzeProduct({ url: "https://example.com/product/123" })).rejects.toMatchObject({
+    await expect(analyzeExtractedProduct(extractedPayload)).rejects.toMatchObject({
       code: "invalid_response",
       status: 502,
     } satisfies Partial<ApiError>);
@@ -280,7 +272,7 @@ describe("apiClient", () => {
       ),
     );
 
-    await expect(analyzeProduct({ url: "https://example.com/product/123" })).rejects.toMatchObject({
+    await expect(analyzeExtractedProduct(extractedPayload)).rejects.toMatchObject({
       code: "invalid_response",
       status: 502,
     } satisfies Partial<ApiError>);
@@ -297,7 +289,7 @@ describe("apiClient", () => {
       ),
     );
 
-    await expect(analyzeProduct({ url: "https://example.com/product/123" })).rejects.toMatchObject({
+    await expect(analyzeExtractedProduct(extractedPayload)).rejects.toMatchObject({
       code: "invalid_response",
       status: 502,
     } satisfies Partial<ApiError>);

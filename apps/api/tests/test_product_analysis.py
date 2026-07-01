@@ -57,13 +57,13 @@ def test_analyze_product_accepts_url_only_and_returns_product(monkeypatch) -> No
 
     response = client.post(
         "/api/analyze-product",
-        json={"url": "https://example.com/product/123"},
+        json={"url": "https://www.amazon.com/dp/B0TEST1234"},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["scan_id"]
-    assert body["product"]["url"] == "https://example.com/product/123"
+    assert body["product"]["url"] == "https://www.amazon.com/dp/B0TEST1234"
     assert body["product"]["product_title"] == "Wireless Headphones"
     assert body["product"]["seller_name"] == "Example Store"
     assert 0 <= body["trust_score"] <= 100
@@ -87,7 +87,7 @@ def test_scan_v1_returns_url_only_inference_response(monkeypatch) -> None:
 
     response = client.post(
         "/api/v1/scan",
-        json={"url": "https://example.com/product/123"},
+        json={"url": "https://www.amazon.com/dp/B0TEST1234"},
     )
 
     assert response.status_code == 200
@@ -104,10 +104,10 @@ def test_scan_extracted_scores_active_tab_product_data() -> None:
         "/api/v1/scan-extracted",
         json={
             "product": {
-                "url": "https://example.com/product/123",
-                "site": "example.com",
+                "url": "https://www.amazon.com/dp/B07RMMDY21",
+                "site": "www.amazon.com",
                 "product_title": "Amazon Essentials Women's Mid-Rise Stretchy Skinny Jeans",
-                "product_image_url": "https://example.com/jeans.jpg",
+                "product_image_url": "https://m.media-amazon.com/images/jeans.jpg",
                 "price": 16.4,
                 "currency": "USD",
                 "seller": {"name": "Amazon Essentials Store"},
@@ -158,8 +158,8 @@ def test_scan_extracted_uses_market_reference_when_serper_finds_comparables(monk
         "/api/v1/scan-extracted",
         json={
             "product": {
-                "url": "https://www.etsy.com/listing/1566610967/soccer-ball-engraved-glasses",
-                "site": "www.etsy.com",
+                "url": "https://www.amazon.com/dp/B0SOCCER01",
+                "site": "www.amazon.com",
                 "product_title": "Soccer Ball Engraved Glasses",
                 "price": 24.5,
                 "currency": "USD",
@@ -219,8 +219,8 @@ def test_scan_extracted_tolerates_extra_browser_fields_and_bad_optional_ratings(
             "target_market": "US",
             "unexpected_top_level": "ignored",
             "product": {
-                "url": "https://www.ebay.com/itm/188272417479",
-                "site": "www.ebay.com",
+                "url": "https://www.amazon.com/dp/B0CHARGE01",
+                "site": "www.amazon.com",
                 "product_title": "Wireless Charging Pad",
                 "price": 19.99,
                 "currency": "USD",
@@ -546,8 +546,8 @@ def test_scan_extracted_marks_review_page_as_low_evidence() -> None:
         "/api/v1/scan-extracted",
         json={
             "product": {
-                "url": "https://www.bestbuy.com/site/reviews/logitech-mouse/6282602",
-                "site": "www.bestbuy.com",
+                "url": "https://www.amazon.com/reviews/logitech-mouse/6282602",
+                "site": "www.amazon.com",
                 "product_title": "Customer Ratings & Reviews",
                 "reviews": [{"text": "Comfortable mouse after long use."}],
             },
@@ -569,7 +569,7 @@ def test_scan_returns_product_not_detected(monkeypatch) -> None:
 
     monkeypatch.setattr(product_routes, "analyze_product_url", missing_product)
 
-    response = client.post("/api/v1/scan", json={"url": "https://example.com/nope"})
+    response = client.post("/api/v1/scan", json={"url": "https://www.amazon.com/dp/B0NOPE1234"})
 
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "product_not_detected"
@@ -583,7 +583,7 @@ def test_scan_returns_product_page_unavailable(monkeypatch) -> None:
 
     monkeypatch.setattr(product_routes, "analyze_product_url", unavailable)
 
-    response = client.post("/api/v1/scan", json={"url": "https://example.com/product"})
+    response = client.post("/api/v1/scan", json={"url": "https://www.amazon.com/dp/B0UNAVAIL1"})
 
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "product_page_unavailable"
@@ -624,13 +624,90 @@ def test_scan_calls_persistence_hook(monkeypatch) -> None:
 
     response = client.post(
         "/api/v1/scan",
-        json={"url": "https://example.com/product/123", "browser_id": "browser-1"},
+        json={"url": "https://www.amazon.com/dp/B0TEST1234", "browser_id": "browser-1"},
     )
 
     assert response.status_code == 200
     assert calls
     assert calls[0]["browser_id"] == "browser-1"
     assert str(calls[0]["response"].scan_id) == response.json()["scan_id"]
+
+
+def _amazon_extracted_body(**extra_product: object) -> dict:
+    product = {
+        "url": "https://www.amazon.com/dp/B0FEEDBACK1",
+        "site": "www.amazon.com",
+        "product_title": "Wireless Keyboard",
+        "seller": {"name": "Example Store", "rating": 4.5, "review_count": 5000},
+        "rating": 4.4,
+        "review_count": 1200,
+        "reviews": [{"text": "Solid keyboard, works great after a month of use."}],
+    }
+    product.update(extra_product)
+    return {"target_market": "US", "product": product}
+
+
+def test_feedback_score_nudges_trustscore_a_little() -> None:
+    client = TestClient(app)
+
+    baseline = client.post("/api/v1/scan-extracted", json=_amazon_extracted_body())
+    negative = client.post(
+        "/api/v1/scan-extracted", json=_amazon_extracted_body(feedback_score=10)
+    )
+
+    assert baseline.status_code == 200
+    assert negative.status_code == 200
+    base_body = baseline.json()
+    neg_body = negative.json()
+
+    # Feedback is applied (not the inert neutral path) ...
+    assert base_body["model_modes"]["user_feedback_history"] == "not_applied"
+    assert neg_body["model_modes"]["user_feedback_history"] == "applied_feedback_history"
+    assert neg_body["component_scores"]["user_feedback_history"] == 10
+
+    # ... and moves the score, but only a little (small weight).
+    delta = base_body["trust_score"] - neg_body["trust_score"]
+    assert 0 < delta <= 6
+
+
+def test_scan_extracted_is_deterministic_on_rescan() -> None:
+    client = TestClient(app)
+
+    first = client.post("/api/v1/scan-extracted", json=_amazon_extracted_body())
+    second = client.post("/api/v1/scan-extracted", json=_amazon_extracted_body())
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["trust_score"] == second.json()["trust_score"]
+    assert first.json()["component_scores"] == second.json()["component_scores"]
+
+
+def test_scan_rejects_non_amazon_url() -> None:
+    client = TestClient(app)
+
+    response = client.post("/api/v1/scan", json={"url": "https://www.ebay.com/itm/123"})
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "unsupported_site"
+
+
+def test_scan_extracted_rejects_non_amazon_url() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "product": {
+                "url": "https://www.ebay.com/itm/188272417479",
+                "site": "www.ebay.com",
+                "product_title": "Wireless Charging Pad",
+                "reviews": [],
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "unsupported_site"
 
 
 def test_model_info_returns_runtime_configuration() -> None:
@@ -642,7 +719,7 @@ def test_model_info_returns_runtime_configuration() -> None:
     body = response.json()
     assert body["model_version"] == "0.3.0"
     assert "trustscore_weights" in body
-    assert body["feedback_scoring"] == "not_applied"
+    assert body["feedback_scoring"] == "applied_small_weight_when_feedback_present"
     assert body["market_reference"]["provider"] == "serper"
     assert body["market_reference"]["fx_conversion"] == {
         "provider": "frankfurter",

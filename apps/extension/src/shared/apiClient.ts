@@ -3,7 +3,6 @@ import type {
   FeedbackPayload,
   FeedbackResponse,
   HealthCheckResponse,
-  ProductAnalysisPayload,
   ProductAnalysisResponse,
 } from "./types";
 
@@ -49,19 +48,6 @@ async function requestJson<TResponse>(
 
 export function getHealth(): Promise<HealthCheckResponse> {
   return requestJson<HealthCheckResponse>("/health");
-}
-
-export function analyzeProduct(
-  payload: ProductAnalysisPayload,
-): Promise<ProductAnalysisResponse> {
-  return requestJson<ProductAnalysisResponse>(
-    "/api/v1/scan",
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
-    isProductAnalysisResponse,
-  );
 }
 
 export async function analyzeExtractedProduct(

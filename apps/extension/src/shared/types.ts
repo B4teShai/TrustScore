@@ -45,6 +45,7 @@ export type ExtractedProductPayload = {
   rating?: number;
   review_count?: number;
   units_bought_recent?: number;
+  feedback_score?: number;
 };
 
 export type ExtractedProductAnalysisPayload = {

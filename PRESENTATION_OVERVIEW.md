@@ -10,8 +10,9 @@ Online shoppers can't easily tell whether a product listing is trustworthy: revi
 faked, sellers can be unreliable, and prices can be inflated relative to the real market.
 **AI TrustScore** automates that judgment call.
 
-It's a **Chrome extension + FastAPI backend**. A shopper opens any product page, clicks the
-extension, and gets back:
+It's a **Chrome extension + FastAPI backend**, focused on **Amazon product pages only** so it
+can scrape reliably and score correctly rather than half-working on every site. A shopper opens
+an Amazon product page, clicks the extension, and gets back:
 
 - A **trust score (0–100)**
 - A **risk level** — Low / Medium / High
@@ -22,21 +23,24 @@ model or rule, so the result is explainable rather than a black box.
 
 ## 2. High-level pipeline
 
-This matches the architecture diagram in the slide deck: the DOM scraping happens
-**client-side**, inside the extension, before anything is sent to the backend.
+The DOM scraping happens **client-side**, inside the extension, reading the already-rendered
+Amazon page in the shopper's own logged-in tab. That is deliberate: Amazon bot-blocks anonymous
+server-side fetches and returns partial/empty HTML, so scraping in the browser is what makes the
+data — and therefore the score — reliable. Only the extracted fields are sent to the backend.
 
 ```
- Shopper lands on a product page (e.g. Amazon, Target)
+ Shopper lands on an Amazon product page
               │
               ▼
       Chrome Extension — React popup
               │
               ▼
-      DOM Scraper / Page Extractor (content script)
-      extracts: title, price, seller, reviews, return policy
-              │  sends extracted fields
+      In-tab DOM extractor (chrome.scripting)
+      reads: title, price, seller, reviews, return policy, rating, review count
+      + fetches Amazon review pages (/product-reviews/<ASIN>) for many reviews
+              │  sends extracted fields (no raw HTML, no URL-only fetch)
               ▼
-      FastAPI backend — Inference API   (POST /v1/scan)
+      FastAPI backend — Inference API   (POST /v1/scan-extracted, Amazon-only)
               │
       ┌───────┴────────────────────┐
       ▼                            ▼
@@ -46,11 +50,21 @@ This matches the architecture diagram in the slide deck: the DOM scraping happen
       │                     TrustScore (0–100) + risk level
       │                            │
       ▼                            ▼
-  PostgreSQL — scan history   Response → UI popup feedback
-  (persisted)                 (score, risk level, reasons, evidence)
+  PostgreSQL — scan history   Response → UI popup
+  (persisted)                 (score, risk, reasons, evidence, "what we read")
 ```
 
-Two details the diagram doesn't show, but are real in the code, worth knowing for Q&A:
+Details the diagram doesn't show, but are real in the code, worth knowing for Q&A:
+- **Amazon-only, in-browser scraping.** The extension runs only on `amazon.*` pages; other
+  sites show an "Amazon only" message. The backend also rejects non-Amazon URLs
+  (`422 unsupported_site`). The old server-side URL-fetch path (`POST /v1/scan`) is no longer
+  used by the extension because Amazon bot-blocks it.
+- **Many reviews.** Amazon renders only ~8 reviews on the product page, so the extension also
+  fetches the dedicated review pages (`sortBy=helpful`, up to ~50 reviews) via a same-origin
+  request from the logged-in tab, then merges and de-duplicates. A larger, fixed review sample
+  is also why **rescanning the same product returns the same score** instead of drifting.
+- **"What we read" panel.** The popup shows the actual data it collected — the real review
+  texts, seller, price, rating, review count, return policy — so the score is transparent.
 - **Price safety** is enriched with a live market-price lookup (Serper shopping search +
   currency conversion) so the scorer compares the listing against a real reference price, not
   just the listing itself.
@@ -74,8 +88,8 @@ For one scan, the backend works with structured product-page fields:
   number of comparable listings, and optional exchange-rate conversion evidence.
 - Seller context: seller name, official-store/platform-seller flags, marketplace fulfillment,
   seller rating, seller review count, and seller tenure when visible.
-- Review context: up to 50 visible review samples with review text, rating, date, and verified
-  purchase flag.
+- Review context: up to 50 review samples (from the product page plus the Amazon review pages)
+  with review text, rating, date, and verified-purchase flag.
 - Policy context: visible return/refund/warranty wording.
 
 The page text is cleaned before scoring: HTML and marketplace UI boilerplate are removed,
@@ -185,8 +199,11 @@ active:
   missing inputs.
 - Price safety becomes active only when both `price` and `average_market_price` exist.
 - Return-policy clarity becomes active only when return-policy text is visible.
-- User feedback history is collected for future evaluation, but the current production weight is
-  **0**, so it does not affect the public score.
+- User feedback history becomes active only when the shopper has previously voted 👍/👎 on that
+  product. The vote is stored per product and replayed on later scans as a 0–100 feedback value,
+  applied with a small weight (**0.05**). With no prior vote it stays inert and does not affect
+  the score. Because the stored vote does not change on a plain rescan, feedback moves the score
+  a little but rescanning does not.
 
 Then the final score is:
 
@@ -206,7 +223,7 @@ Default weights:
 | Sentiment | 0.20 |
 | Return-policy clarity | 0.15 |
 | Price safety | 0.10 |
-| User feedback history | 0.00 |
+| User feedback history | 0.05 (active only when the shopper has voted on that product) |
 
 Because the formula divides by the sum of **active** weights, missing price or policy evidence
 does not automatically punish or reward a product. Instead, the response separately lists
@@ -245,7 +262,7 @@ listing scored 68," but also which signals created that number and which inputs 
 | Seller reliability | 20% | **Transparent rule** on rating, review count, and active years (tenure) | Deterministic — no accuracy metric, by design (see leakage story below) |
 | Return-policy clarity | 15% | **Transparent rule** matching return/warranty/time-window wording | Deterministic — same reasoning as seller reliability |
 | Price safety | 10% | v3 leakage-safe market-price ratio rule, backed by an unsupervised **IsolationForest + ratio-rule** production artifact and live market-price lookup | **1.0 recall** on injected price anomalies |
-| User feedback history | 0% active today | Placeholder for a future feedback loop | Not yet active — reserved for when real user feedback data exists |
+| User feedback history | 5% (only when the shopper voted on that product) | Shopper's stored 👍/👎 for the product, replayed as a 0–100 value and applied with a small weight | Deterministic — a small, bounded nudge, not a trained metric |
 
 The winning review-authenticity model (TF-IDF + LinearSVC) was chosen partly for being
 **lightweight**: ~705KB on disk and low inference latency, versus a much heavier transformer
@@ -340,21 +357,27 @@ active submodel and rule outputs described above.
 
 ## 8. How it's used at runtime
 
-1. Shopper clicks the extension on a product page → extension sends the page to the backend
-   (`POST /v1/scan`).
-2. Backend scrapes and extracts structured data: title, price, seller, reviews, return policy.
+1. Shopper clicks the extension on an **Amazon** product page. The extension reads the rendered
+   DOM in the current tab and also fetches the Amazon review pages for more reviews, then sends
+   the extracted fields to the backend (`POST /v1/scan-extracted`). Non-Amazon pages are blocked
+   client-side and by the backend (`422 unsupported_site`).
+2. Extracted structured data — title, price, seller, up to 50 reviews, return policy, rating,
+   review count — is sanitized on the backend.
 3. All component scorers run — the ML models score what they can; if a model artifact
    is missing, that signal falls back to a heuristic, and the response says which happened.
 4. Price safety is enriched with a live market-price lookup and currency conversion.
 5. The weighted formula combines the active component scores into the final 0–100 trust score
-   and Low/Medium/High risk level.
+   and Low/Medium/High risk level. If the shopper has a stored 👍/👎 for this product, it is
+   applied as a small (0.05-weight) nudge; a plain rescan with no new vote returns the same score.
 6. If an Anthropic API key is configured, **Claude** writes a short, plain-language
    explanation of the result, in the shopper's own page language (currently English and
    Japanese are the primary targets) — otherwise a rule-based English explanation is used. The
    score itself is identical either way; only the wording of the explanation changes.
 7. The full result — score, risk level, component scores, reasons, evidence, and exactly which
    model/fallback produced each number — is returned to the extension and saved (to Postgres if
-   configured, otherwise to a local file), so every scan is auditable after the fact.
+   configured, otherwise to a local file), so every scan is auditable after the fact. The popup
+   also shows a **"what we read"** panel with the actual reviews, seller, price, and policy it
+   collected, so the shopper can see what the score is based on.
 
 ## 9. Deployment
 

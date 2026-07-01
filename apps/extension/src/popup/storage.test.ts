@@ -10,6 +10,7 @@ import {
   safeImageUrl,
   storeLastResult,
 } from "./App";
+import { resetApiClientCompatibilityCacheForTests } from "../shared/apiClient";
 import type { ProductAnalysisResponse } from "../shared/types";
 
 const result: ProductAnalysisResponse = {
@@ -77,6 +78,7 @@ const apiResult: ProductAnalysisResponse = {
 
 describe("popup storage helpers", () => {
   afterEach(() => {
+    resetApiClientCompatibilityCacheForTests();
     vi.unstubAllGlobals();
   });
 
@@ -185,6 +187,43 @@ describe("popup storage helpers", () => {
     expect(payload?.currency).toBeUndefined();
   });
 
+  it("keeps strong Amazon preview evidence while dropping localized page currency", () => {
+    const preview = normalizeProductPreview({
+      title: "mommore Kids Backpack for Boys Girls 4-8 Kindergarten Elementary School Backpack",
+      imageUrl: "https://m.media-amazon.com/images/I/816XvP67HUL._AC_SX679_.jpg",
+      seller: "mommore Store",
+      price: 107454.17,
+      currency: "MNT",
+      rating: 4.7,
+      reviewCount: 1686,
+      returnPolicy: "30-day refund / replacement",
+      reviews: [
+        {
+          text: "Brief content visible, double tap to read full content. Very durable backpack after daily use. Read more Read less",
+          rating: 5,
+          verified_purchase: true,
+        },
+      ],
+    });
+
+    const payload = productPayloadFromPreview({
+      host: "www.amazon.com",
+      preview: preview ?? undefined,
+      targetMarket: "US",
+      url: "https://www.amazon.com/dp/B0B28J2S6N",
+    });
+
+    expect(payload).toMatchObject({
+      product_title: "mommore Kids Backpack for Boys Girls 4-8 Kindergarten Elementary School Backpack",
+      review_count: 1686,
+      reviews: [{ text: "Very durable backpack after daily use.", rating: 5 }],
+      seller: { name: "mommore Store" },
+      site: "www.amazon.com",
+    });
+    expect(payload?.price).toBeUndefined();
+    expect(payload?.currency).toBeUndefined();
+  });
+
   it("keeps same-market JPY marketplace preview prices", () => {
     const preview = normalizeProductPreview({
       title: "Japanese Snack Box",
@@ -233,9 +272,12 @@ describe("popup storage helpers", () => {
     });
   });
 
-  it("uses URL scan before active-tab extracted fallback", async () => {
+  it("uses active-tab extracted scan before URL scan when preview is strong", async () => {
     installChromeStorage();
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, apiResult));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { market_reference: { active: true } }))
+      .mockResolvedValueOnce(jsonResponse(200, { ...apiResult, fetch_mode: "extension_dom" }));
     vi.stubGlobal("fetch", fetchMock);
 
     await analyzeProductWithPreviewFallback({
@@ -250,68 +292,67 @@ describe("popup storage helpers", () => {
       url: "https://www.amazon.com/dp/B0TEST1234",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("https://walrus-app-38mjb.ondigitalocean.app/api/v1/scan");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://walrus-app-38mjb.ondigitalocean.app/api/v1/model-info");
+    expect(fetchMock.mock.calls[1][0]).toBe("https://walrus-app-38mjb.ondigitalocean.app/api/v1/scan-extracted");
+    expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain(
+      "https://walrus-app-38mjb.ondigitalocean.app/api/v1/scan",
+    );
   });
 
-  it("falls back to active-tab scan after product detection failure with strong preview", async () => {
+  it("does not fall back to a URL scan when the active-tab scan fails", async () => {
     installChromeStorage();
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { market_reference: { active: true } }))
       .mockResolvedValueOnce(
-        jsonResponse(422, {
+        jsonResponse(503, {
           detail: {
-            code: "product_not_detected",
-            message: "This page does not have enough product-detail signals.",
+            code: "scan_extracted_unavailable",
+            message: "Active-tab scan is temporarily unavailable.",
           },
         }),
-      )
-      .mockResolvedValueOnce(jsonResponse(200, { market_reference: { active: true } }))
-      .mockResolvedValueOnce(jsonResponse(200, apiResult));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await analyzeProductWithPreviewFallback({
-      host: "www.amazon.co.jp",
-      preview: {
-        title: "Magic Trackpad",
-        imageUrl: "https://example.com/trackpad.jpg",
-        price: 16800,
-        currency: "JPY",
-        seller: "Apple Store",
-      },
-      targetMarket: "JP",
-      url: "https://www.amazon.co.jp/dp/B0TESTJP14",
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[2][0]).toBe("https://walrus-app-38mjb.ondigitalocean.app/api/v1/scan-extracted");
-  });
-
-  it("does not fall back to extracted scan for weak review-page previews", async () => {
-    installChromeStorage();
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(422, {
-        detail: {
-          code: "product_not_detected",
-          message: "This page does not have enough product-detail signals.",
-        },
-      }),
-    );
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
       analyzeProductWithPreviewFallback({
-        host: "www.bestbuy.com",
+        host: "www.amazon.co.jp",
+        preview: {
+          title: "Magic Trackpad",
+          imageUrl: "https://example.com/trackpad.jpg",
+          price: 16800,
+          currency: "JPY",
+          seller: "Apple Store",
+        },
+        targetMarket: "JP",
+        url: "https://www.amazon.co.jp/dp/B0TESTJP14",
+      }),
+    ).rejects.toMatchObject({ code: "scan_extracted_unavailable" });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain(
+      "https://walrus-app-38mjb.ondigitalocean.app/api/v1/scan",
+    );
+  });
+
+  it("rejects weak review-page previews without any network scan", async () => {
+    installChromeStorage();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      analyzeProductWithPreviewFallback({
+        host: "www.amazon.com",
         preview: {
           title: "Customer Ratings & Reviews",
           reviews: [{ text: "Comfortable mouse after long use." }],
         },
         targetMarket: "US",
-        url: "https://www.bestbuy.com/site/reviews/logitech-mouse/6282602",
+        url: "https://www.amazon.com/reviews/B0TEST1234",
       }),
     ).rejects.toMatchObject({ code: "product_not_detected" });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

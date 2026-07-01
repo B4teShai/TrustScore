@@ -4,7 +4,6 @@ import "./App.css";
 import {
   ApiError,
   analyzeExtractedProduct,
-  analyzeProduct,
   submitFeedback,
 } from "../shared/apiClient";
 import type {
@@ -64,6 +63,7 @@ type CurrentPage = {
 const LAST_RESULT_KEY = "trustscore:lastResult";
 const BROWSER_ID_KEY = "trustscore:browserId";
 const PENDING_FEEDBACK_KEY = "trustscore:pendingFeedback";
+const PRODUCT_FEEDBACK_KEY = "trustscore:productFeedback";
 const REVIEW_UI_COPY_RE =
   /(brief content visible,\s*double tap to read full content\.?|full content visible,\s*double tap to read brief content\.?|read more\s+read less|the media could not be loaded\.?)/gi;
 
@@ -337,8 +337,19 @@ function componentTone(score: number): RiskKey {
   return riskFromScore(score);
 }
 
+function isAmazonHost(url: string | undefined): boolean {
+  if (!url) {
+    return false;
+  }
+  try {
+    return /(^|\.)amazon\./i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 function isSupportedPageUrl(url: string | undefined) {
-  return Boolean(url && /^https?:\/\//i.test(url));
+  return Boolean(url && /^https?:\/\//i.test(url) && isAmazonHost(url));
 }
 
 export async function getStoredResultForPage(
@@ -358,6 +369,29 @@ export async function storeLastResult(result: ProductAnalysisResponse): Promise<
 async function storePendingFeedback(payload: FeedbackPayload): Promise<void> {
   const pending = (await storageGet<FeedbackPayload[]>(PENDING_FEEDBACK_KEY)) ?? [];
   await storageSet(PENDING_FEEDBACK_KEY, [...pending.slice(-49), payload]);
+}
+
+// A helpful/not-helpful vote maps to a stable 0-100 feedback-history value that
+// the backend applies to the score with a small weight. Stored per product so a
+// plain rescan (no new vote) sends the same value and the score stays stable.
+export function feedbackScoreFromVote(helpful: boolean): number {
+  return helpful ? 80 : 30;
+}
+
+export async function storeProductFeedbackScore(
+  productUrl: string,
+  score: number,
+): Promise<void> {
+  const map = (await storageGet<Record<string, number>>(PRODUCT_FEEDBACK_KEY)) ?? {};
+  map[canonicalProductPageUrl(productUrl)] = score;
+  await storageSet(PRODUCT_FEEDBACK_KEY, map);
+}
+
+export async function getProductFeedbackScore(
+  productUrl: string,
+): Promise<number | undefined> {
+  const map = (await storageGet<Record<string, number>>(PRODUCT_FEEDBACK_KEY)) ?? {};
+  return map[canonicalProductPageUrl(productUrl)];
 }
 
 export async function getOrCreateBrowserId(): Promise<string | undefined> {
@@ -530,7 +564,7 @@ function normalizeReviews(value: unknown): PreviewReview[] {
       verified_purchase:
         typeof candidate.verified_purchase === "boolean" ? candidate.verified_purchase : undefined,
     });
-    if (reviews.length >= 30) {
+    if (reviews.length >= 50) {
       break;
     }
   }
@@ -599,7 +633,7 @@ export function productPayloadFromPreview(page: CurrentPage): ExtractedProductPa
     currency: priceInfo.currency,
     seller,
     return_policy: limitText(preview.returnPolicy, 4000),
-    reviews: (preview.reviews ?? []).slice(0, 30),
+    reviews: (preview.reviews ?? []).slice(0, 50),
     rating: preview.rating,
     review_count: preview.reviewCount,
     units_bought_recent: preview.unitsBoughtRecent,
@@ -1021,9 +1055,11 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
       .filter((value): value is string => Boolean(value));
   }
 
-  function reviewsFromDom(): Array<{ text: string; rating?: number; verified_purchase?: boolean }> {
+  function reviewsFromRoot(
+    root: ParentNode,
+  ): Array<{ text: string; rating?: number; verified_purchase?: boolean }> {
     const nodes = Array.from(
-      document.querySelectorAll(
+      root.querySelectorAll(
         [
           '[data-hook="review"]',
           '[data-hook="cmps-review"]',
@@ -1036,7 +1072,7 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
           '.review',
         ].join(", "),
       ),
-    ).slice(0, 40);
+    );
     const out: Array<{ text: string; rating?: number; verified_purchase?: boolean }> = [];
     const seen = new Set<string>();
     for (const node of nodes) {
@@ -1074,6 +1110,76 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
       });
     }
     return out;
+  }
+
+  function asinFromLocation(): string | null {
+    const match = window.location.pathname.match(
+      /\/(?:dp|gp\/product|product-reviews)\/([A-Z0-9]{10})(?:[/?]|$)/i,
+    );
+    return match ? match[1].toUpperCase() : null;
+  }
+
+  async function fetchReviewPageDoc(asin: string, page: number): Promise<Document | null> {
+    // Same-origin fetch runs in the logged-in Amazon tab context, so it returns
+    // the real reviews page HTML (not a bot-defended snapshot).
+    const url =
+      `${window.location.origin}/product-reviews/${asin}/` +
+      `?reviewerType=all_reviews&sortBy=helpful&pageNumber=${page}`;
+    try {
+      const response = await fetch(url, { credentials: "include" });
+      if (!response.ok) {
+        return null;
+      }
+      return new DOMParser().parseFromString(await response.text(), "text/html");
+    } catch {
+      return null;
+    }
+  }
+
+  async function collectReviews(
+    target: number,
+  ): Promise<Array<{ text: string; rating?: number; verified_purchase?: boolean }>> {
+    const merged: Array<{ text: string; rating?: number; verified_purchase?: boolean }> = [];
+    const seen = new Set<string>();
+    const add = (
+      list: Array<{ text: string; rating?: number; verified_purchase?: boolean }>,
+    ): number => {
+      let added = 0;
+      for (const review of list) {
+        if (seen.has(review.text)) {
+          continue;
+        }
+        seen.add(review.text);
+        merged.push(review);
+        added += 1;
+      }
+      return added;
+    };
+
+    add(reviewsFromRoot(document));
+
+    // Amazon renders only a handful of reviews on the product page. Pull the
+    // dedicated reviews pages (helpful sort = stable across rescans) to gather
+    // as many as possible, up to the backend cap.
+    const asin = isAmazon() ? asinFromLocation() : null;
+    if (asin && merged.length < target) {
+      const maxPages = 8;
+      const deadline = Date.now() + 9000;
+      for (let page = 1; page <= maxPages && merged.length < target; page += 1) {
+        if (Date.now() > deadline) {
+          break;
+        }
+        const doc = await fetchReviewPageDoc(asin, page);
+        if (!doc) {
+          break;
+        }
+        if (add(reviewsFromRoot(doc)) === 0) {
+          break;
+        }
+      }
+    }
+
+    return merged.slice(0, target);
   }
 
   function descriptionFromDom(): string | undefined {
@@ -1437,7 +1543,7 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
     unitsBoughtRecent: recentPurchasesFromDom(),
     description: descriptionFromDom(),
     returnPolicy: returnPolicyFromDom(),
-    reviews: reviewsFromDom(),
+    reviews: await collectReviews(50),
     lang,
   };
 }
@@ -1965,14 +2071,132 @@ function SummaryReasons({ reasons, risk }: { reasons: string[]; risk: RiskKey })
   );
 }
 
+function formatReadPrice(price?: number, currency?: string): string | null {
+  if (typeof price !== "number" || !Number.isFinite(price)) {
+    return null;
+  }
+  const amount = price.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return currency ? `${currency} ${amount}` : amount;
+}
+
+function ratingStars(rating?: number): string | null {
+  if (typeof rating !== "number" || !Number.isFinite(rating)) {
+    return null;
+  }
+  const rounded = Math.round(rating);
+  const full = Math.max(0, Math.min(5, rounded));
+  return `${"★".repeat(full)}${"☆".repeat(5 - full)}`;
+}
+
+function WhatWeReadPanel({ preview }: { preview?: ProductPreview }) {
+  if (!preview) {
+    return null;
+  }
+
+  const priceLabel = formatReadPrice(preview.price, preview.currency);
+  const reviews = preview.reviews ?? [];
+  const facts: Array<{ label: string; value: string }> = [];
+
+  if (typeof preview.rating === "number") {
+    const stars = ratingStars(preview.rating);
+    facts.push({
+      label: "Overall rating",
+      value: `${stars ? `${stars} ` : ""}${preview.rating.toFixed(1)} / 5`,
+    });
+  }
+  if (typeof preview.reviewCount === "number") {
+    facts.push({
+      label: "Total ratings on page",
+      value: preview.reviewCount.toLocaleString(),
+    });
+  }
+  if (typeof preview.unitsBoughtRecent === "number") {
+    facts.push({
+      label: "Bought recently",
+      value: `${preview.unitsBoughtRecent.toLocaleString()}+`,
+    });
+  }
+  if (preview.seller) {
+    facts.push({ label: "Seller", value: preview.seller });
+  }
+  if (priceLabel) {
+    facts.push({ label: "Listed price", value: priceLabel });
+  }
+
+  const hasContent = facts.length > 0 || reviews.length > 0 || Boolean(preview.returnPolicy);
+  if (!hasContent) {
+    return null;
+  }
+
+  return (
+    <details className="scan-details read-details">
+      <summary className="details-summary">
+        <span className="details-label">
+          <I.ReviewAuth size={13} />
+          <span className="show-details-label">Show what we read</span>
+          <span className="hide-details-label">Hide what we read</span>
+        </span>
+        <span className="mono muted">
+          {reviews.length} review{reviews.length === 1 ? "" : "s"} read
+        </span>
+      </summary>
+      <div className="details-body">
+        {facts.length ? (
+          <div className="read-facts">
+            {facts.map((fact) => (
+              <div className="read-fact" key={fact.label}>
+                <span className="read-fact-label">{fact.label}</span>
+                <span className="read-fact-value">{fact.value}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {preview.returnPolicy ? (
+          <div className="read-policy">
+            <div className="read-block-title">Return policy</div>
+            <p>{preview.returnPolicy}</p>
+          </div>
+        ) : null}
+
+        {reviews.length ? (
+          <div className="read-reviews">
+            <div className="read-block-title">Reviews read from this page</div>
+            {reviews.map((review, index) => {
+              const stars = ratingStars(review.rating);
+              return (
+                <div className="read-review" key={`${index}-${review.text.slice(0, 24)}`}>
+                  <div className="read-review-head">
+                    {stars ? <span className="read-review-stars">{stars}</span> : null}
+                    {review.verified_purchase ? (
+                      <span className="read-review-verified">
+                        <I.CheckCircle size={11} /> Verified
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="read-review-text">{review.text}</p>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="read-empty">No visible review text on this page.</div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 function ResultState({
   onAnalyze,
   onFeedback,
   result,
+  preview,
 }: {
   onAnalyze: () => void;
   onFeedback: () => void;
   result: ProductAnalysisResponse;
+  preview?: ProductPreview;
 }) {
   const risk = riskFromLevel(result.risk_level);
   const components = Object.entries(result.component_scores) as Array<
@@ -2068,6 +2292,8 @@ function ResultState({
       ) : null}
 
       <SummaryReasons reasons={result.top_reasons} risk={risk} />
+
+      <WhatWeReadPanel preview={preview} />
 
       <details className="scan-details">
         <summary className="details-summary">
@@ -2227,7 +2453,7 @@ function isFeedbackRetryable(error: unknown): boolean {
   return error instanceof TypeError;
 }
 
-function FeedbackBlock({ scanId }: { scanId: string }) {
+function FeedbackBlock({ scanId, productUrl }: { scanId: string; productUrl: string }) {
   const [vote, setVote] = useState<"yes" | "no" | null>(null);
   const [comment, setComment] = useState("");
   const [selectedChip, setSelectedChip] = useState<(typeof FEEDBACK_CHIPS)[number] | null>(null);
@@ -2256,6 +2482,9 @@ function FeedbackBlock({ scanId }: { scanId: string }) {
       corrected_component: chip?.component,
       comment: note || undefined,
     };
+    // Remember the vote per product so the next scan applies it as a small,
+    // stable nudge (rescanning without a new vote will not move the score).
+    await storeProductFeedbackScore(productUrl, feedbackScoreFromVote(payload.helpful));
     try {
       const response = await submitFeedback(payload);
       setFeedbackStatus(response.status);
@@ -2474,22 +2703,22 @@ export async function analyzeProductWithPreviewFallback(
   const locale = pageLocale(page);
   const previewProduct = productPayloadFromPreview(page);
 
-  try {
-    return await analyzeProduct({
-      url: page.url,
-      browser_id: browserId,
-      locale,
-      target_market: page.targetMarket,
-    });
-  } catch (error) {
-    if (
-      !(error instanceof ApiError) ||
-      !canFallbackToExtractedScan(error) ||
-      !previewProduct ||
-      !hasStrongProductPreview(page)
-    ) {
-      throw error;
-    }
+  // Amazon-only, DOM-only: always score the DOM read from the active tab. This
+  // uses the already-rendered page in the user's own session, so it is not
+  // affected by the bot-blocking that makes server-side URL fetches unreliable.
+  if (!previewProduct || !hasStrongProductPreview(page, previewProduct)) {
+    throw new ApiError(
+      "TrustScore could not read this Amazon page. Reload the product page and try again.",
+      422,
+      "product_not_detected",
+    );
+  }
+
+  // Replay this user's prior feedback for the product so it nudges the score a
+  // little. No new vote means the same value on rescan, keeping the score stable.
+  const storedFeedback = await getProductFeedbackScore(page.url);
+  if (storedFeedback !== undefined) {
+    previewProduct.feedback_score = storedFeedback;
   }
 
   return analyzeExtractedProduct({
@@ -2500,24 +2729,17 @@ export async function analyzeProductWithPreviewFallback(
   });
 }
 
-function canFallbackToExtractedScan(error: ApiError): boolean {
-  return error.code === "product_page_unavailable" || error.code === "product_not_detected";
-}
-
-function hasStrongProductPreview(page: CurrentPage): boolean {
-  const preview = page.preview;
-  if (!preview?.title || isUnsupportedProductPageType(page.url)) {
+function hasStrongProductPreview(
+  page: CurrentPage,
+  previewProduct: ExtractedProductPayload,
+): boolean {
+  // On a supported Amazon product page the in-tab DOM read is always the source
+  // of truth, so a real product title is enough to proceed. Reject only pages
+  // that are clearly not a product detail page (search, reviews, cart, ...).
+  if (!previewProduct.product_title || isUnsupportedProductPageType(page.url)) {
     return false;
   }
-  const signals = [
-    preview.price !== undefined,
-    Boolean(preview.seller),
-    preview.rating !== undefined || preview.reviewCount !== undefined,
-    Boolean(preview.imageUrl),
-    Boolean(preview.returnPolicy),
-    Boolean(preview.reviews?.length),
-  ].filter(Boolean).length;
-  return signals >= 2;
+  return previewProduct.product_title !== "Unknown product";
 }
 
 function isUnsupportedProductPageType(urlValue: string): boolean {
@@ -2649,6 +2871,7 @@ function App() {
           onAnalyze={handleAnalyzeClick}
           onFeedback={() => setState("feedback")}
           result={result}
+          preview={currentPage?.preview}
         />
       ) : null}
       {state === "feedback" && result ? (
@@ -2657,8 +2880,9 @@ function App() {
             onAnalyze={handleAnalyzeClick}
             onFeedback={() => undefined}
             result={result}
+            preview={currentPage?.preview}
           />
-          <FeedbackBlock scanId={result.scan_id} />
+          <FeedbackBlock scanId={result.scan_id} productUrl={result.product.url} />
         </>
       ) : null}
       {state === "error" && error ? (
@@ -2671,7 +2895,7 @@ function App() {
       {state === "empty" ? (
         <EmptyState
           onRefresh={handlePageDetection}
-          reason="Open an HTTP or HTTPS page first."
+          reason="TrustScore works on Amazon product pages only. Open an amazon.com product page (amazon.com/dp/…) and try again."
         />
       ) : null}
     </main>

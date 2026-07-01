@@ -39,7 +39,7 @@ those *are* real, measured outputs.
 | Seller reliability | 20% |
 | Return-policy clarity | 15% |
 | Price safety | 10% |
-| User feedback history | 0% (allocated 5%, not active — no real feedback data collected yet) |
+| User feedback history | 5% — active only when the shopper has voted 👍/👎 on that product |
 
 Rationale, if pressed:
 - **Review authenticity gets the highest weight (30%)** because fake reviews are the most
@@ -49,9 +49,10 @@ Rationale, if pressed:
   because it's the least certain signal: it's an unsupervised anomaly heuristic (not a
   calibrated probability like the ML models), and it depends on a live market-price lookup
   that isn't always available for every listing.
-- **User feedback history is weighted 0%** on purpose — it's a placeholder for a future
-  feedback loop; there's no real user feedback data yet, so it isn't allowed to silently
-  influence the score.
+- **User feedback history is weighted 5%** and applied only when the shopper has actually voted
+  on that product. The vote (👍/👎) is stored per product and replayed on later scans, so it
+  nudges the score a little but does not dominate it — a small, bounded influence by design.
+  With no prior vote it stays inert (weight effectively 0 for that scan).
 - These weights are a **hand-set design choice**, not learned from data — there's no public
   dataset with a real "trust score" label to fit them against. Say this plainly if asked; it's
   consistent with the "no fabricated ground truth" theme of the whole project.
@@ -102,6 +103,52 @@ sentiment cross-domain test (Yelp/IMDb/SST-2) is a second, independent example �
 the sentiment model wasn't just memorizing Amazon-specific language. Both support the same
 theme (don't trust a number until you've tried to break it), but they're different models and
 different failure modes."
+
+---
+
+### Q: "Why is it Amazon-only? Isn't a trust checker more useful across every site?"
+
+**Answer:** "We scoped it to Amazon on purpose. A scraper that half-works on every site produces
+missing fields, which makes the score unreliable — and an unreliable trust score is worse than
+none. Amazon is the highest-value single marketplace, its page structure is stable, and focusing
+on it lets us scrape correctly and score confidently. The architecture generalizes — adding
+another marketplace is a new extraction profile, not a redesign — but we'd rather be right on one
+site than wrong on ten. The extension only activates on `amazon.*` pages and the backend rejects
+non-Amazon URLs with a clear `unsupported_site` error."
+
+---
+
+### Q: "How do you scrape Amazon without getting bot-blocked?"
+
+**Answer:** "We don't fetch the page from a server — Amazon bot-blocks anonymous server requests
+and returns partial or empty HTML. Instead the extension reads the page **in the shopper's own
+logged-in browser tab**, where the page is already fully rendered. That's the key reliability
+decision: the DOM read happens client-side, and only the extracted fields (not raw HTML) are sent
+to the backend. To gather more than the ~8 reviews Amazon shows on the product page, the extension
+also makes a **same-origin** request to the dedicated review pages (`/product-reviews/<ASIN>`) from
+that same logged-in tab, so those come back fully rendered too."
+
+---
+
+### Q: "Why does the score sometimes look different if I rescan? Is it random?"
+
+**Answer:** "It shouldn't change, and the scoring itself is fully deterministic — no randomness,
+same inputs give the same score. Earlier, rescans could drift because the browser had lazy-loaded
+a different handful of reviews each time. We fixed that by pulling a larger, fixed review sample
+(review pages sorted by 'helpful', de-duplicated), so the input set is stable and the score is
+stable. The one thing that *can* intentionally move the score is the shopper's own feedback vote —
+and even that is a small, bounded nudge (5% weight)."
+
+---
+
+### Q: "If feedback changes the score, can a user just game their own score?"
+
+**Answer:** "Only slightly, and only for themselves. A vote is stored per product and applied with
+a small 5% weight, so it nudges the number without overriding the evidence-based signals. It's
+meant as a personal correction ('I looked into this, it was fine/not fine'), not a crowd signal —
+and because it's bounded it can't flip a high-risk listing to low-risk on its own. A future version
+with real aggregated, server-side feedback data could make this a proper learned signal; today it's
+a deliberately conservative, transparent nudge."
 
 ---
 

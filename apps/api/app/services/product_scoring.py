@@ -58,15 +58,20 @@ def build_trustscore(
     risk_scores = score_risk_signals(payload)
     active_components = _active_components(payload)
 
+    feedback_applied = payload.feedback_score is not None
     component_scores = ComponentScores(
         review_authenticity=fake_reviews.authenticity_score,
         seller_reliability=risk_scores.seller_reliability,
         sentiment=sentiment.score,
         return_policy_clarity=risk_scores.return_policy_clarity,
         price_safety=risk_scores.price_safety,
-        user_feedback_history=50,
+        user_feedback_history=payload.feedback_score if feedback_applied else 50,
     )
-    trust_score = calculate_trustscore(component_scores, active_components=active_components)
+    trust_score = calculate_trustscore(
+        component_scores,
+        active_components=active_components,
+        include_feedback=feedback_applied,
+    )
     risk_level = classify_risk(trust_score)
     missing_inputs = _missing_inputs(payload, review_features.total_reviews, signals)
     english_reasons = top_reasons(component_scores, active_components=active_components)
@@ -109,7 +114,7 @@ def build_trustscore(
         "seller_reliability": risk_scores.seller_mode,
         "price_safety": _price_mode(payload, risk_scores.price_mode, signals),
         "return_policy_clarity": _policy_mode(payload, risk_scores.policy_mode),
-        "user_feedback_history": "not_applied",
+        "user_feedback_history": "applied_feedback_history" if feedback_applied else "not_applied",
     }
     normalized_identity_confidence = round(max(0.0, min(1.0, product_identity_confidence)), 2)
     score_status = (
@@ -137,9 +142,13 @@ def build_trustscore(
         evidence=evidence,
         missing_inputs=missing_inputs,
         score_semantics=(
-            "TrustScore is normalized over non-feedback evidence. User feedback is stored "
-            "for evaluation and is not used in the score until reviewed aggregates exist. "
-            "Use confidence and missing inputs before relying on the score."
+            "TrustScore is normalized over the visible evidence. Prior user feedback for "
+            "the same product is applied with a small weight when available; otherwise it "
+            "is not scored. Use confidence and missing inputs before relying on the score."
+            if feedback_applied
+            else "TrustScore is normalized over non-feedback evidence. User feedback is stored "
+            "for evaluation and is applied with a small weight only when prior feedback "
+            "exists for the product. Use confidence and missing inputs before relying on the score."
         ),
         recommendation=recommendation,
         recommendation_source=recommendation_source,
@@ -242,6 +251,8 @@ def _active_components(payload: ProductPageData) -> set[str]:
         active.add("price_safety")
     if payload.return_policy:
         active.add("return_policy_clarity")
+    if payload.feedback_score is not None:
+        active.add("user_feedback_history")
     return active
 
 
@@ -300,7 +311,7 @@ def _score_trace(
         item = evidence_by_component.get(component)
         mode = model_modes.get(component) or model_modes.get(_model_key_for_component(component)) or "unknown"
         is_active = component in active_components
-        if component == "user_feedback_history":
+        if component == "user_feedback_history" and not is_active:
             status = "not_scored"
             public_score = None
         elif not is_active or mode.startswith("not_scored"):
@@ -467,6 +478,15 @@ def _component_evidence(
     else:
         sentiment_missing.append("review text or product rating")
 
+    feedback_evidence: list[str] = []
+    feedback_missing: list[str] = []
+    if payload.feedback_score is not None:
+        feedback_evidence.append(
+            f"Applied prior user feedback for this product ({payload.feedback_score}/100, small weight)"
+        )
+    else:
+        feedback_missing.append("reviewed feedback aggregate")
+
     return [
         ComponentEvidence(
             component="review_authenticity",
@@ -511,10 +531,14 @@ def _component_evidence(
         ),
         ComponentEvidence(
             component="user_feedback_history",
-            summary="Feedback is collected for evaluation but is not applied to this score.",
-            evidence=[],
-            missing_inputs=["reviewed feedback aggregate"],
-            confidence=0.0,
+            summary=(
+                "Prior user feedback for this product, applied with a small weight."
+                if payload.feedback_score is not None
+                else "Feedback is collected for evaluation but is not applied to this score."
+            ),
+            evidence=feedback_evidence[:5],
+            missing_inputs=feedback_missing,
+            confidence=0.5 if payload.feedback_score is not None else 0.0,
         ),
     ]
 
