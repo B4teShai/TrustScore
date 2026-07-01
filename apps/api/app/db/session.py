@@ -23,7 +23,8 @@ def get_engine() -> Any | None:
     except Exception as exc:  # pragma: no cover - dependency issue only
         logger.warning(
             "database_dependency_unavailable",
-            extra={"error_type": type(exc).__name__},
+            extra={"error_type": type(exc).__name__, "error": str(exc)},
+            exc_info=True,
         )
         return None
 
@@ -32,7 +33,8 @@ def get_engine() -> Any | None:
     except Exception as exc:
         logger.warning(
             "database_engine_unavailable",
-            extra={"error_type": type(exc).__name__},
+            extra={"error_type": type(exc).__name__, "error": str(exc)},
+            exc_info=True,
         )
         return None
 

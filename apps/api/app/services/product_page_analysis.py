@@ -32,6 +32,22 @@ class ProductPageAnalysis:
     canonical_product_url: str | None = None
 
 
+STATIC_FETCH_MAX_ATTEMPTS = 2
+_COMPLETE_ENOUGH_SIGNALS = 3
+
+
+def _extraction_completeness(product: ProductPageData) -> int:
+    """Count populated key fields, used to pick the fuller of two extraction attempts."""
+    return sum(
+        [
+            product.price is not None,
+            bool(product.reviews),
+            product.seller is not None,
+            bool(product.return_policy),
+        ]
+    )
+
+
 def analyze_product_url(
     url: str,
     *,
@@ -42,13 +58,16 @@ def analyze_product_url(
     static_error: PageFetchError | None = None
     static_result_reason = "This page does not have enough product-detail signals."
     render_url = url
+    best_static = None  # (FetchedPage, ExtractionResult)
+    best_completeness = -1
 
-    try:
-        static_page = fetch_public_html(url)
-    except PageFetchError as exc:
-        static_page = None
-        static_error = exc
-    else:
+    for attempt in range(STATIC_FETCH_MAX_ATTEMPTS):
+        try:
+            static_page = fetch_public_html(url)
+        except PageFetchError as exc:
+            static_error = exc
+            break
+
         render_url = static_page.final_url
         static_result = extract_product_page(
             static_page.html,
@@ -58,19 +77,32 @@ def analyze_product_url(
         )
         static_result_reason = static_result.reason
         if static_result.detected and static_result.product is not None:
-            product, market_signals = enrich_market_reference(
-                static_result.product,
-                target_market=target_market,
-                locale=locale,
-            )
-            return ProductPageAnalysis(
-                product=product,
-                fetch_mode=static_page.mode,
-                signals=[*static_result.signals, *market_signals],
-                page_type=static_result.page_type,
-                product_identity_confidence=static_result.product_identity_confidence,
-                canonical_product_url=static_result.canonical_product_url,
-            )
+            completeness = _extraction_completeness(static_result.product)
+            if completeness > best_completeness:
+                best_static = (static_page, static_result)
+                best_completeness = completeness
+            if completeness >= _COMPLETE_ENOUGH_SIGNALS:
+                break
+            # Marketplace pages can serve a partial/bot-defended snapshot on a given
+            # request; one retry often lands on a fuller page for the same URL.
+            continue
+        break
+
+    if best_static is not None:
+        static_page, static_result = best_static
+        product, market_signals = enrich_market_reference(
+            static_result.product,
+            target_market=target_market,
+            locale=locale,
+        )
+        return ProductPageAnalysis(
+            product=product,
+            fetch_mode=static_page.mode,
+            signals=[*static_result.signals, *market_signals],
+            page_type=static_result.page_type,
+            product_identity_confidence=static_result.product_identity_confidence,
+            canonical_product_url=static_result.canonical_product_url,
+        )
 
     rendered_page = None
     if settings.enable_rendered_fetch:

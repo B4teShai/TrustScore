@@ -87,3 +87,4 @@ ml/artifacts/**/.tmp/
 .code-review-graph/
 .claude/settings.local.json
 PRESENTATION_OVERVIEW.md
+PRESENTATION_QA_PREP.md

@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import ipaddress
 import socket
+import time
 from typing import Iterator
 from urllib.parse import urljoin, urlparse, urlunparse
 
@@ -15,6 +16,8 @@ import httpx
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_REDIRECTS = 4
 REQUEST_TIMEOUT_SECONDS = 8.0
+TRANSIENT_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+FETCH_RETRY_BACKOFF_SECONDS = (0.5, 1.5)
 RENDERED_PRODUCT_SELECTORS = (
     # Amazon product detail surface
     "#productTitle",
@@ -82,6 +85,10 @@ USER_AGENT = (
 class PageFetchError(RuntimeError):
     """Raised when a public product page cannot be fetched."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class URLValidationError(ValueError):
     """Raised when a URL is not safe for the product-page fetcher."""
@@ -128,7 +135,20 @@ def validate_public_web_url(raw_url: str) -> str:
 
 
 def fetch_public_html(url: str) -> FetchedPage:
-    """Fetch a public web page with bounded redirects and response size."""
+    """Fetch a public web page, retrying transient failures with backoff."""
+    last_error: PageFetchError | None = None
+    for attempt, backoff_seconds in enumerate((*FETCH_RETRY_BACKOFF_SECONDS, None)):
+        try:
+            return _fetch_public_html_once(url)
+        except PageFetchError as exc:
+            last_error = exc
+            if exc.status_code not in TRANSIENT_RETRY_STATUS_CODES or backoff_seconds is None:
+                raise
+            time.sleep(backoff_seconds)
+    raise last_error  # pragma: no cover - loop always returns or raises
+
+
+def _fetch_public_html_once(url: str) -> FetchedPage:
     current_url = validate_public_web_url(url)
     headers = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5",
@@ -154,7 +174,8 @@ def fetch_public_html(url: str) -> FetchedPage:
 
                     if response.status_code >= 400:
                         raise PageFetchError(
-                            f"Product page returned HTTP status {response.status_code}."
+                            f"Product page returned HTTP status {response.status_code}.",
+                            status_code=response.status_code,
                         )
 
                     validate_public_web_url(str(response.url))

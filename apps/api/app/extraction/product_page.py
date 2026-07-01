@@ -927,7 +927,7 @@ def _focus_policy_snippet(value: str) -> str:
     start_matches = list(POLICY_START_RE.finditer(context[: max(anchor.end() - context_start, 0)]))
     if start_matches and not re.match(r"^\d", context):
         preferred = next(
-            (match for match in start_matches if match.group(1).lower() == "this item"),
+            (match for match in start_matches if (match.group(1) or "").lower() == "this item"),
             start_matches[-1],
         )
         context = context[preferred.start() :].strip()

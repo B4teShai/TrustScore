@@ -187,7 +187,11 @@ def save_scan(
             )
         return True
     except Exception as exc:
-        logger.warning("scan_persistence_failed", extra={"error_type": type(exc).__name__})
+        logger.warning(
+            "scan_persistence_failed",
+            extra={"error_type": type(exc).__name__, "error": str(exc)},
+            exc_info=True,
+        )
         return False
 
 
@@ -245,7 +249,11 @@ def save_feedback(payload: FeedbackRequest) -> FeedbackPersistenceResult:
             )
         return FeedbackPersistenceResult(status="saved")
     except Exception as exc:
-        logger.warning("feedback_persistence_failed", extra={"error_type": type(exc).__name__})
+        logger.warning(
+            "feedback_persistence_failed",
+            extra={"error_type": type(exc).__name__, "error": str(exc)},
+            exc_info=True,
+        )
         return FeedbackPersistenceResult(status="error")
 
 
@@ -665,7 +673,11 @@ def _append_local(record: dict) -> bool:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         return True
     except Exception as exc:
-        logger.warning("local_persistence_failed", extra={"error_type": type(exc).__name__})
+        logger.warning(
+            "local_persistence_failed",
+            extra={"error_type": type(exc).__name__, "error": str(exc)},
+            exc_info=True,
+        )
         return False
 
 
