@@ -81,6 +81,7 @@ ml/artifacts/**/*.safetensors
 ml/artifacts/**/*.tmp
 ml/artifacts/**/tmp/
 ml/artifacts/**/.tmp/
+!ml/artifacts/best/**/*.joblib
 
 # Local assistant/tooling state
 .code-review-graph/

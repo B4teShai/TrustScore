@@ -1,0 +1,55 @@
+# Local secrets and environment files
+.env
+.env.*
+*.env
+*.env.*
+!*.env.example
+!*.env.*.example
+
+# Git and local assistant/tooling state
+.git
+.claude
+.code-review-graph
+
+# Python local state
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Node local state and builds
+node_modules/
+apps/extension/node_modules/
+apps/extension/dist/
+apps/extension/.vite/
+apps/extension/coverage/
+coverage/
+*.tsbuildinfo
+
+# Runtime state and logs
+apps/api/.data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+playwright-report/
+test-results/
+
+# Local data and large generated model artifacts.
+ml/data/**
+ml/artifacts/**
+!ml/artifacts/
+!ml/artifacts/best/
+!ml/artifacts/best/**
+catboost_info/
+
+# Non-runtime project material
+presentation/
+docs/
