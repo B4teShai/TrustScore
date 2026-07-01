@@ -86,3 +86,4 @@ ml/artifacts/**/.tmp/
 # Local assistant/tooling state
 .code-review-graph/
 .claude/settings.local.json
+PRESENTATION_OVERVIEW.md

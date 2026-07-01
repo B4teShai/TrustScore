@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 TargetMarket = Literal["auto", "US", "JP", "EU", "UK"]
 ResolvedTargetMarket = Literal["US", "JP", "EU", "UK"]
+ResolvedMarketCountry = Literal["US", "JP", "UK", "FR", "DE", "IT", "ES", "NL", "BE", "IE", "AT", "PT", "PL", "SE", "EU"]
 
 SUPPORTED_TARGET_MARKETS = {"auto", "US", "JP", "EU", "UK"}
 TARGET_MARKET_CURRENCIES: dict[ResolvedTargetMarket, str] = {
@@ -78,6 +79,41 @@ def market_from_url(url: str) -> ResolvedTargetMarket | None:
         return "UK"
     if any(host.endswith(marker) for marker in EU_HOST_MARKERS):
         return "EU"
+    if (
+        host == "amazon.com"
+        or host.endswith(".amazon.com")
+        or host == "ebay.com"
+        or host.endswith(".ebay.com")
+        or host == "etsy.com"
+        or host.endswith(".etsy.com")
+    ):
+        return "US"
+    return None
+
+
+def market_country_from_url(url: str) -> ResolvedMarketCountry | None:
+    """Infer a country-level market for audit/search while preserving the public EU token."""
+    host = (urlparse(url).hostname or url).lower().strip(".")
+    suffix_map: dict[str, ResolvedMarketCountry] = {
+        ".fr": "FR",
+        ".de": "DE",
+        ".it": "IT",
+        ".es": "ES",
+        ".nl": "NL",
+        ".be": "BE",
+        ".ie": "IE",
+        ".at": "AT",
+        ".pt": "PT",
+        ".pl": "PL",
+        ".se": "SE",
+    }
+    if host.endswith(".co.jp") or host.endswith(".jp"):
+        return "JP"
+    if host.endswith(".co.uk") or host.endswith(".uk"):
+        return "UK"
+    for suffix, market in suffix_map.items():
+        if host.endswith(suffix):
+            return market
     if (
         host == "amazon.com"
         or host.endswith(".amazon.com")

@@ -27,6 +27,9 @@ class ProductPageAnalysis:
     product: ProductPageData
     fetch_mode: str
     signals: list[str]
+    page_type: str = "product"
+    product_identity_confidence: float = 1.0
+    canonical_product_url: str | None = None
 
 
 def analyze_product_url(
@@ -64,6 +67,9 @@ def analyze_product_url(
                 product=product,
                 fetch_mode=static_page.mode,
                 signals=[*static_result.signals, *market_signals],
+                page_type=static_result.page_type,
+                product_identity_confidence=static_result.product_identity_confidence,
+                canonical_product_url=static_result.canonical_product_url,
             )
 
     rendered_page = None
@@ -93,6 +99,9 @@ def analyze_product_url(
                 product=product,
                 fetch_mode=rendered_page.mode,
                 signals=[*rendered_result.signals, *market_signals],
+                page_type=rendered_result.page_type,
+                product_identity_confidence=rendered_result.product_identity_confidence,
+                canonical_product_url=rendered_result.canonical_product_url,
             )
 
     if static_error is not None:

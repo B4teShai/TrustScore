@@ -544,6 +544,10 @@ export function productPayloadFromPreview(page: CurrentPage): ExtractedProductPa
           name: limitText(preview.seller, 160),
           rating: preview.sellerRating,
           review_count: preview.sellerReviewCount,
+          brand_store_name: looksLikeOfficialStore(preview.seller) ? limitText(preview.seller, 160) : undefined,
+          is_official_store: looksLikeOfficialStore(preview.seller) || undefined,
+          is_platform_seller: looksLikePlatformSeller(preview.seller) || undefined,
+          seller_source: preview.seller ? "active_tab" : undefined,
         }
       : undefined;
 
@@ -562,6 +566,19 @@ export function productPayloadFromPreview(page: CurrentPage): ExtractedProductPa
     review_count: preview.reviewCount,
     units_bought_recent: preview.unitsBoughtRecent,
   };
+}
+
+function looksLikeOfficialStore(value?: string): boolean {
+  return Boolean(
+    value &&
+      /\b(Apple|Amazon|Logitech|StarTech|Sony|Samsung|Microsoft|Anker|Belkin|Dell|HP)\b.*\b(Store|Official)\b/i.test(
+        value,
+      ),
+  );
+}
+
+function looksLikePlatformSeller(value?: string): boolean {
+  return Boolean(value && /\b(Amazon|Best Buy|Walmart|Target|Etsy|eBay)\b/i.test(value));
 }
 
 function pageLocale(page: CurrentPage): string | undefined {
@@ -1149,6 +1166,7 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
     return (
       text("#corePrice_feature_div .a-price .a-offscreen") ||
       text("#corePrice_feature_div .a-price") ||
+      splitAmazonPriceText() ||
       text(".a-price .a-offscreen") ||
       text(".a-price") ||
       text("#priceblock_ourprice") ||
@@ -1156,6 +1174,33 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
       text("#price_inside_buybox") ||
       attr("meta[property='product:price:amount']", "content")
     );
+  }
+
+  function splitAmazonPriceText(): string | undefined {
+    const containers = Array.from(
+      document.querySelectorAll(
+        "#corePriceDisplay_desktop_feature_div, #apex_desktop, #corePrice_feature_div, .a-price",
+      ),
+    );
+    for (const container of containers) {
+      const symbol = compact(container.querySelector(".a-price-symbol")?.textContent);
+      const whole = compact(container.querySelector(".a-price-whole")?.textContent)?.replace(/[.,]\s*$/, "");
+      const fraction = compact(container.querySelector(".a-price-fraction")?.textContent);
+      if (!whole) {
+        continue;
+      }
+      if (symbol && fraction) {
+        return `${symbol}${whole}.${fraction}`;
+      }
+      if (symbol) {
+        return `${symbol}${whole}`;
+      }
+      if (fraction) {
+        return `${whole}.${fraction}`;
+      }
+      return whole;
+    }
+    return undefined;
   }
 
   function ratingTextFromDom(): string | undefined {
@@ -1397,7 +1442,11 @@ function ScoreRing({ score, risk }: { score: number; risk: RiskKey }) {
   const offset = circumference * (1 - score / 100);
 
   return (
-    <div className={`score-ring risk-${risk}`}>
+    <div
+      aria-label={`TrustScore ${score} out of 100, ${riskLabel(risk)}`}
+      className={`score-ring risk-${risk}`}
+      role="img"
+    >
       <svg width="168" height="168">
         <circle cx="84" cy="84" r={radius} className="ring-bg" />
         <circle
@@ -1415,6 +1464,55 @@ function ScoreRing({ score, risk }: { score: number; risk: RiskKey }) {
       </div>
     </div>
   );
+}
+
+type ScanReliability = {
+  evidenceLabel: "High evidence" | "Partial evidence" | "Limited evidence" | "Insufficient evidence";
+  isWeak: boolean;
+  message: string;
+};
+
+function scanReliability(result: ProductAnalysisResponse): ScanReliability {
+  const confidence = result.confidence;
+  const identity = result.product_identity_confidence ?? 1;
+  const pageType = result.page_type ?? "product";
+  const scoreStatus = result.score_status ?? "scored";
+  const missingCore = result.missing_inputs.filter((item) =>
+    ["visible review text", "seller profile", "product price"].includes(item),
+  ).length;
+  const isWeak =
+    scoreStatus === "low_evidence_triage" ||
+    pageType !== "product" ||
+    confidence < 0.55 ||
+    identity < 0.75 ||
+    missingCore >= 2;
+
+  if (pageType !== "product" || identity < 0.45) {
+    return {
+      evidenceLabel: "Insufficient evidence",
+      isWeak: true,
+      message: "Product details may be incomplete or this page may not be a product detail page.",
+    };
+  }
+  if (isWeak) {
+    return {
+      evidenceLabel: "Limited evidence",
+      isWeak: true,
+      message: "Treat this as a triage signal because important page evidence was missing or unscored.",
+    };
+  }
+  if (confidence < 0.75) {
+    return {
+      evidenceLabel: "Partial evidence",
+      isWeak: false,
+      message: "Some useful product evidence was read, but manual checks are still needed.",
+    };
+  }
+  return {
+    evidenceLabel: "High evidence",
+    isWeak: false,
+    message: "TrustScore read enough visible page evidence for a normal scoring view.",
+  };
 }
 
 type CoverageStatus = "read" | "partial" | "missing" | "not-scored";
@@ -1523,6 +1621,43 @@ function SignalCoverageSection({ result }: { result: ProductAnalysisResponse }) 
   );
 }
 
+function MarketContextSection({ result }: { result: ProductAnalysisResponse }) {
+  const context = result.market_context;
+  const priceTrace = result.score_trace?.find((item) => item.component === "price_safety");
+  if (!context && !priceTrace) {
+    return null;
+  }
+  const priceStatus =
+    priceTrace?.status === "not_scored"
+      ? priceTrace.evidence[0] || priceTrace.missing_inputs[0] || "Price safety was not scored."
+      : priceTrace?.status
+        ? `Price safety ${priceTrace.status.replace("_", " ")}.`
+        : "Price status unavailable.";
+
+  return (
+    <>
+      <div className="sec-h">
+        <h3>Market context</h3>
+      </div>
+      <div className="market-context">
+        <div>
+          <span>Market</span>
+          <strong>
+            {context?.resolved_country || context?.resolved_market || "Unknown"}
+          </strong>
+        </div>
+        <div>
+          <span>Currency</span>
+          <strong>
+            {context?.listed_currency || "Not visible"} / {context?.expected_currency || "expected"}
+          </strong>
+        </div>
+        <p>{priceStatus}</p>
+      </div>
+    </>
+  );
+}
+
 function Header({ state }: { state: ViewState }) {
   return (
     <div className="popup-head">
@@ -1625,7 +1760,7 @@ function LoadingState({ progress }: { progress: number }) {
   const taskIdx = Math.min(4, Math.floor((progress / 100) * LOADING_TASKS.length));
 
   return (
-    <div className="popup-body fade-swap">
+    <div className="popup-body fade-swap" role="status" aria-label="Analyzing product evidence">
       <div className="scanner">
         <div className="ring-bg" />
         <div className="ring-fg" />
@@ -1700,6 +1835,7 @@ function ResultState({
   );
   const sourceLabel = result.fetch_mode === "extension_dom" ? "Active-tab scan" : "Page scan";
   const isLowConfidence = result.confidence < 0.55;
+  const reliability = scanReliability(result);
 
   function isScored(name: keyof ComponentScores): boolean {
     return name !== "user_feedback_history" && !result.model_modes[name]?.startsWith("not_scored");
@@ -1732,23 +1868,37 @@ function ResultState({
         </div>
       </div>
 
-      {isLowConfidence ? (
-        <div className="confidence-banner">
+      {reliability.isWeak ? (
+        <div className="confidence-banner" role="status">
           <I.AlertTriangle size={14} />
-          <span>Limited evidence. Treat this score as a triage signal, not a final verdict.</span>
+          <span>{reliability.message}</span>
         </div>
       ) : null}
 
-      <div className="score-wrap">
-        <ScoreRing risk={risk} score={result.trust_score} />
-        <div className={`pill pill-${risk}`}>
-          <span className="dot" />
-          {riskLabel(risk)}
+      {reliability.isWeak ? (
+        <div className="score-limited" aria-label={`${reliability.evidenceLabel}. TrustScore ${result.trust_score}.`}>
+          <div className="limited-eyebrow">{reliability.evidenceLabel}</div>
+          <h3>Evidence check needed</h3>
+          <p>
+            TrustScore {result.trust_score} · {riskLabel(risk)} · Confidence{" "}
+            {Math.round(result.confidence * 100)}%
+          </p>
         </div>
-        <div className="confidence-line">
-          Confidence {Math.round(result.confidence * 100)}% ·{" "}
-          {isLowConfidence ? "Limited evidence" : "Evidence scored"}
+      ) : (
+        <div className="score-wrap">
+          <ScoreRing risk={risk} score={result.trust_score} />
+          <div className={`pill pill-${risk}`}>
+            <span className="dot" />
+            {riskLabel(risk)}
+          </div>
+          <div className="confidence-line">
+            Confidence {Math.round(result.confidence * 100)}% · {reliability.evidenceLabel}
+          </div>
         </div>
+      )}
+
+      <div className="confidence-note">
+        Confidence reflects readable page evidence, not a guarantee of product safety.
       </div>
 
       <div className={`recco ${isLowConfidence ? "is-caution" : ""}`}>
@@ -1762,13 +1912,14 @@ function ResultState({
       </div>
 
       {result.missing_inputs.length ? (
-        <div className="missing-strip">
+        <div className="missing-strip" role="status">
           <I.AlertTriangle size={13} />
           <span>Missing: {result.missing_inputs.slice(0, 4).join(", ")}</span>
         </div>
       ) : null}
 
       <SignalCoverageSection result={result} />
+      <MarketContextSection result={result} />
 
       <div className="sec-h">
         <h3>Top reasons</h3>
@@ -1893,6 +2044,9 @@ function EvidenceSection({ evidence }: { evidence: ComponentEvidence[] }) {
               <div className="evidence-copy">
                 <div className="lbl">{config.label}</div>
                 <div className="sub">{item.evidence[0] || item.summary}</div>
+                {item.evidence.slice(1, 4).map((detail) => (
+                  <div className="sub" key={detail}>{detail}</div>
+                ))}
                 {item.missing_inputs.length ? (
                   <div className="miss">Missing {item.missing_inputs.slice(0, 2).join(", ")}</div>
                 ) : null}
@@ -1970,6 +2124,7 @@ function FeedbackBlock({ scanId }: { scanId: string }) {
       <h4>Was this result helpful?</h4>
       <div className="fb-row">
         <button
+          aria-pressed={vote === "yes"}
           className={`fb-btn is-yes ${vote === "yes" ? "is-active" : ""}`}
           disabled={isSubmitting}
           onClick={() => {
@@ -1983,6 +2138,7 @@ function FeedbackBlock({ scanId }: { scanId: string }) {
           Yes
         </button>
         <button
+          aria-pressed={vote === "no"}
           className={`fb-btn is-no ${vote === "no" ? "is-active" : ""}`}
           onClick={() => {
             setVote("no");
@@ -2010,6 +2166,7 @@ function FeedbackBlock({ scanId }: { scanId: string }) {
         <div className="fb-chip-grid" aria-label="What was off">
           {FEEDBACK_CHIPS.map((chip) => (
             <button
+              aria-pressed={selectedChip?.value === chip.value}
               className={`fb-chip ${selectedChip?.value === chip.value ? "is-active" : ""}`}
               key={chip.value}
               onClick={() => setSelectedChip(chip)}
@@ -2136,28 +2293,77 @@ function EmptyState({
   );
 }
 
-async function analyzeProductWithPreviewFallback(
+export async function analyzeProductWithPreviewFallback(
   page: CurrentPage,
 ): Promise<ProductAnalysisResponse> {
   const browserId = await getOrCreateBrowserId();
   const locale = pageLocale(page);
   const previewProduct = productPayloadFromPreview(page);
 
-  if (previewProduct) {
-    return analyzeExtractedProduct({
-      product: previewProduct,
+  try {
+    return await analyzeProduct({
+      url: page.url,
       browser_id: browserId,
       locale,
       target_market: page.targetMarket,
     });
+  } catch (error) {
+    if (
+      !(error instanceof ApiError) ||
+      !canFallbackToExtractedScan(error) ||
+      !previewProduct ||
+      !hasStrongProductPreview(page)
+    ) {
+      throw error;
+    }
   }
 
-  return analyzeProduct({
-    url: page.url,
+  return analyzeExtractedProduct({
+    product: previewProduct,
     browser_id: browserId,
     locale,
     target_market: page.targetMarket,
   });
+}
+
+function canFallbackToExtractedScan(error: ApiError): boolean {
+  return error.code === "product_page_unavailable" || error.code === "product_not_detected";
+}
+
+function hasStrongProductPreview(page: CurrentPage): boolean {
+  const preview = page.preview;
+  if (!preview?.title || isUnsupportedProductPageType(page.url)) {
+    return false;
+  }
+  const signals = [
+    preview.price !== undefined,
+    Boolean(preview.seller),
+    preview.rating !== undefined || preview.reviewCount !== undefined,
+    Boolean(preview.imageUrl),
+    Boolean(preview.returnPolicy),
+    Boolean(preview.reviews?.length),
+  ].filter(Boolean).length;
+  return signals >= 2;
+}
+
+function isUnsupportedProductPageType(urlValue: string): boolean {
+  try {
+    const path = new URL(urlValue).pathname.toLowerCase();
+    return (
+      path.includes("/review") ||
+      path.includes("/reviews") ||
+      path.includes("/search") ||
+      path.includes("/category") ||
+      path.includes("/browse") ||
+      path.includes("/cart") ||
+      path.includes("/checkout") ||
+      path.includes("/account") ||
+      path.includes("/signin") ||
+      path.includes("/login")
+    );
+  } catch {
+    return true;
+  }
 }
 
 function App() {

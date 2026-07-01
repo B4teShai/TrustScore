@@ -257,6 +257,88 @@ def test_extract_product_page_from_etsy_like_markup() -> None:
     assert result.product.reviews[0].text == "Beautiful glass and clean engraving for a soccer gift."
 
 
+def test_extract_product_page_from_bestbuy_product_markup() -> None:
+    html = """
+    <html>
+      <head>
+        <meta property="og:title" content="Logitech MX Vertical Mouse" />
+        <meta property="og:image" content="https://pisces.bbystatic.com/image2.jpg" />
+      </head>
+      <body>
+        <h1 data-testid="product-title">Logitech MX Vertical Mouse</h1>
+        <div data-testid="customer-price">$99.99</div>
+        <div data-testid="brand-name">Logitech</div>
+        <div data-testid="ratings-and-reviews">4.6 out of 5 stars with 2,345 reviews</div>
+        <div data-testid="product-description">Ergonomic wireless mouse.</div>
+        <div data-testid="return-policy">15-day return policy available.</div>
+        <button>Add to Cart</button>
+      </body>
+    </html>
+    """
+
+    result = extract_product_page(
+        html,
+        "https://www.bestbuy.com/site/logitech-mx-vertical-mouse/6282602.p",
+    )
+
+    assert result.detected is True
+    assert result.page_type == "product"
+    assert result.product is not None
+    assert "site_bestbuy" in result.signals
+    assert result.product.product_title == "Logitech MX Vertical Mouse"
+    assert result.product.price == 99.99
+    assert result.product.currency == "USD"
+    assert result.product.product_image_url == "https://pisces.bbystatic.com/image2.jpg"
+    assert result.product.review_count == 2345
+    assert result.product.return_policy == "15-day return policy available."
+
+
+def test_extract_product_page_rejects_bestbuy_reviews_page_without_canonical_product() -> None:
+    html = """
+    <html>
+      <body>
+        <h1>Customer Ratings & Reviews</h1>
+        <div class="review-item"><p>Comfortable mouse after long use.</p></div>
+        <div aria-label="4.5 out of 5 stars">4.5 stars</div>
+      </body>
+    </html>
+    """
+
+    result = extract_product_page(
+        html,
+        "https://www.bestbuy.com/site/reviews/logitech-mx-vertical-mouse/6282602",
+    )
+
+    assert result.detected is False
+    assert result.product is None
+    assert result.page_type == "review_page"
+
+
+def test_extract_product_page_canonicalizes_bestbuy_reviews_page_with_product_link() -> None:
+    html = """
+    <html>
+      <body>
+        <a href="/site/logitech-mx-vertical-mouse/6282602.p">View product</a>
+        <h1 data-testid="product-title">Logitech MX Vertical Mouse</h1>
+        <div data-testid="customer-price">$99.99</div>
+        <div data-testid="brand-name">Logitech</div>
+        <button>Add to Cart</button>
+      </body>
+    </html>
+    """
+
+    result = extract_product_page(
+        html,
+        "https://www.bestbuy.com/site/reviews/logitech-mx-vertical-mouse/6282602",
+    )
+
+    assert result.detected is True
+    assert result.page_type == "review_page"
+    assert result.canonical_product_url == "https://www.bestbuy.com/site/logitech-mx-vertical-mouse/6282602.p"
+    assert result.product is not None
+    assert result.product.url == "https://www.bestbuy.com/site/logitech-mx-vertical-mouse/6282602.p"
+
+
 def test_extract_product_page_parses_suffix_currency_generic_markup() -> None:
     html = """
     <html>
@@ -323,6 +405,71 @@ def test_extract_product_page_reads_visible_amazon_jp_price_block() -> None:
     assert result.product.currency == "JPY"
     assert "price" in result.signals
     assert "price_ignored_localized_currency:JPY" not in result.signals
+
+
+def test_extract_product_page_reads_split_amazon_jp_price() -> None:
+    html = """
+    <html>
+      <body>
+        <h1>Magic Trackpad</h1>
+        <div id="corePriceDisplay_desktop_feature_div">
+          <span class="a-price-symbol">￥</span>
+          <span class="a-price-whole">16,800</span>
+        </div>
+        <div id="bylineInfo">Visit the Apple Store</div>
+        <button>Add to cart</button>
+      </body>
+    </html>
+    """
+
+    result = extract_product_page(html, "https://www.amazon.co.jp/dp/B0TESTJP13")
+
+    assert result.detected is True
+    assert result.product is not None
+    assert result.product.price == 16800
+    assert result.product.currency == "JPY"
+
+
+def test_extract_product_page_accepts_japanese_return_policy() -> None:
+    html = """
+    <html>
+      <body>
+        <h1>Magic Trackpad</h1>
+        <span>￥16,800</span>
+        <div id="bylineInfo">Visit the Apple Store</div>
+        <p>この商品は30日以内の返品と返金に対応しています。</p>
+        <button>Add to cart</button>
+      </body>
+    </html>
+    """
+
+    result = extract_product_page(html, "https://www.amazon.co.jp/dp/B0TESTJP14")
+
+    assert result.detected is True
+    assert result.product is not None
+    assert result.product.return_policy == "この商品は30日以内の返品と返金に対応しています。"
+    assert "policy" in result.signals
+
+
+def test_extract_product_page_accepts_french_return_policy() -> None:
+    html = """
+    <html>
+      <body>
+        <h1>Cable DisplayPort StarTech</h1>
+        <span>€23.34</span>
+        <div id="bylineInfo">Visit the StarTech Store</div>
+        <p>Retour et remboursement possibles sous 30 jours avec garantie.</p>
+        <button>Add to cart</button>
+      </body>
+    </html>
+    """
+
+    result = extract_product_page(html, "https://www.amazon.fr/dp/B0TESTFR12")
+
+    assert result.detected is True
+    assert result.product is not None
+    assert result.product.return_policy == "Retour et remboursement possibles sous 30 jours avec garantie."
+    assert "policy" in result.signals
 
 
 def test_extract_product_page_keeps_supported_jpy_price_on_amazon_us() -> None:

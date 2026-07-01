@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  analyzeProductWithPreviewFallback,
   canonicalProductPageUrl,
   getOrCreateBrowserId,
   getStoredResultForPage,
@@ -49,6 +50,29 @@ const result: ProductAnalysisResponse = {
   model_artifact_status: { sentiment: "missing_or_unavailable" },
   model_versions: { trustscore: "0.1.0" },
   is_mock: false,
+};
+
+const apiResult: ProductAnalysisResponse = {
+  ...result,
+  model_modes: {
+    fake_review: "heuristic_fallback",
+    sentiment: "keyword_fallback",
+    seller_reliability: "rule_fallback",
+    price_safety: "not_scored_missing_market_reference",
+    return_policy_clarity: "not_scored_missing_policy",
+    user_feedback_history: "not_applied",
+  },
+  model_artifact_status: {
+    fake_review: "missing_or_unavailable",
+    sentiment: "missing_or_unavailable",
+    risk: "missing_or_unavailable",
+  },
+  model_versions: {
+    trustscore: "0.3.0",
+    fake_review: "0.3.0",
+    sentiment: "0.2.0",
+    risk: "0.3.0",
+  },
 };
 
 describe("popup storage helpers", () => {
@@ -208,6 +232,87 @@ describe("popup storage helpers", () => {
       site: "www.amazon.com",
     });
   });
+
+  it("uses URL scan before active-tab extracted fallback", async () => {
+    installChromeStorage();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, apiResult));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await analyzeProductWithPreviewFallback({
+      host: "www.amazon.com",
+      preview: {
+        title: "Wireless Keyboard",
+        price: 29.99,
+        currency: "USD",
+        seller: "Example Store",
+      },
+      targetMarket: "US",
+      url: "https://www.amazon.com/dp/B0TEST1234",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://walrus-app-38mjb.ondigitalocean.app/api/v1/scan");
+  });
+
+  it("falls back to active-tab scan after product detection failure with strong preview", async () => {
+    installChromeStorage();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(422, {
+          detail: {
+            code: "product_not_detected",
+            message: "This page does not have enough product-detail signals.",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { market_reference: { active: true } }))
+      .mockResolvedValueOnce(jsonResponse(200, apiResult));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await analyzeProductWithPreviewFallback({
+      host: "www.amazon.co.jp",
+      preview: {
+        title: "Magic Trackpad",
+        imageUrl: "https://example.com/trackpad.jpg",
+        price: 16800,
+        currency: "JPY",
+        seller: "Apple Store",
+      },
+      targetMarket: "JP",
+      url: "https://www.amazon.co.jp/dp/B0TESTJP14",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2][0]).toBe("https://walrus-app-38mjb.ondigitalocean.app/api/v1/scan-extracted");
+  });
+
+  it("does not fall back to extracted scan for weak review-page previews", async () => {
+    installChromeStorage();
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(422, {
+        detail: {
+          code: "product_not_detected",
+          message: "This page does not have enough product-detail signals.",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      analyzeProductWithPreviewFallback({
+        host: "www.bestbuy.com",
+        preview: {
+          title: "Customer Ratings & Reviews",
+          reviews: [{ text: "Comfortable mouse after long use." }],
+        },
+        targetMarket: "US",
+        url: "https://www.bestbuy.com/site/reviews/logitech-mouse/6282602",
+      }),
+    ).rejects.toMatchObject({ code: "product_not_detected" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 function installChromeStorage() {
@@ -225,5 +330,12 @@ function installChromeStorage() {
         },
       },
     },
+  });
+}
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
   });
 }

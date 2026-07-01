@@ -13,6 +13,14 @@ export type SellerInfo = {
   rating?: number;
   review_count?: number;
   years_active?: number;
+  sold_by?: string;
+  ships_from?: string;
+  fulfilled_by?: string;
+  brand_store_name?: string;
+  is_platform_seller?: boolean;
+  is_platform_fulfilled?: boolean;
+  is_official_store?: boolean;
+  seller_source?: string;
 };
 
 export type ReviewInput = {
@@ -75,6 +83,24 @@ export type ComponentEvidence = {
   confidence: number;
 };
 
+export type MarketContext = {
+  requested_market: TargetMarket;
+  resolved_market: string;
+  resolved_country?: string | null;
+  expected_currency: string;
+  listed_currency?: string | null;
+};
+
+export type ScoreTraceItem = {
+  component: ComponentKey;
+  score?: number | null;
+  status: "scored" | "not_scored" | "fallback" | "missing_evidence";
+  mode: string;
+  confidence: number;
+  evidence: string[];
+  missing_inputs: string[];
+};
+
 export type ProductAnalysisResponse = {
   scan_id: string;
   product: ProductMetadata;
@@ -95,6 +121,12 @@ export type ProductAnalysisResponse = {
   model_modes: Record<string, string>;
   model_artifact_status: Record<string, unknown>;
   model_versions: Record<string, string>;
+  score_status?: "scored" | "low_evidence_triage";
+  page_type?: "product" | "review_page" | "search" | "category" | "cart" | "account" | "unknown";
+  product_identity_confidence?: number;
+  canonical_product_url?: string | null;
+  market_context?: MarketContext | null;
+  score_trace?: ScoreTraceItem[];
   is_mock: boolean;
 };
 
@@ -110,6 +142,10 @@ export type FeedbackPayload = {
     | "wrong_reviews"
     | "wrong_price"
     | "wrong_policy"
+    | "wrong_page_type"
+    | "wrong_market"
+    | "wrong_currency"
+    | "wrong_extracted_field"
     | "missing_evidence"
     | "other";
   corrected_component?: ComponentKey;

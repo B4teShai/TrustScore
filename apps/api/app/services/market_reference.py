@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.schemas.product_analysis import ProductPageData
 from app.services.market_context import (
     expected_currency_for_market,
+    market_country_from_url,
     market_from_url,
     normalize_currency_code,
     resolve_target_market,
@@ -249,7 +250,7 @@ class SerperMarketReferenceProvider:
         currency = normalize_currency_code(product.currency) or expected_currency
         if not should_use_price_currency(currency, expected_currency=expected_currency, url=product.url):
             return None
-        market = market_from_url(product.url) or resolved_market
+        market = market_country_from_url(product.url) or market_from_url(product.url) or resolved_market
 
         query = _query_for_product(product.product_title)
         if not query:
@@ -391,6 +392,18 @@ def enrich_market_reference(
     allow_without_listed_price: bool = False,
 ) -> tuple[ProductPageData, list[str]]:
     """Add a Serper median market price when a verified reference is available."""
+    if not market_reference_provider.active:
+        return product, ["market_reference:unavailable:provider_inactive"]
+    if product.average_market_price is not None:
+        return product, []
+    if product.price is None and not allow_without_listed_price:
+        return product, ["market_reference:unavailable:missing_listed_price"]
+    resolved_market = resolve_target_market(target_market, url=product.url, locale=locale)
+    expected_currency = expected_currency_for_market(resolved_market)
+    currency = normalize_currency_code(product.currency) or expected_currency
+    if not should_use_price_currency(currency, expected_currency=expected_currency, url=product.url):
+        return product, [f"market_reference:unavailable:currency_mismatch:{currency}"]
+
     reference = market_reference_provider.lookup(
         product,
         target_market=target_market,
@@ -398,7 +411,7 @@ def enrich_market_reference(
         allow_without_listed_price=allow_without_listed_price,
     )
     if reference is None:
-        return product, []
+        return product, ["market_reference:unavailable:no_verified_comparables"]
     enriched = product.model_copy(
         update={
             "average_market_price": reference.median_price,
@@ -556,6 +569,8 @@ def _serper_gl(market: str) -> str:
         return "jp"
     if market == "UK":
         return "gb"
+    if market in {"FR", "DE", "IT", "ES", "NL", "BE", "IE", "AT", "PT", "PL", "SE"}:
+        return market.lower()
     if market == "EU":
         return "de"
     return "us"
@@ -564,6 +579,12 @@ def _serper_gl(market: str) -> str:
 def _serper_hl(market: str) -> str:
     if market == "JP":
         return "ja"
+    if market == "FR":
+        return "fr"
+    if market == "DE":
+        return "de"
+    if market in {"IT", "ES", "NL", "PT", "PL", "SE"}:
+        return market.lower()
     if market == "UK":
         return "en"
     if market == "EU":

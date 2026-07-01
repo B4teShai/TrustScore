@@ -128,6 +128,7 @@ def save_scan(
 
             model_version_id = _upsert_model_version(connection, response)
             _insert_reviews(connection, product_id, product)
+            _insert_scan_review_samples(connection, response, product)
             connection.execute(
                 text(
                     """
@@ -177,6 +178,13 @@ def save_scan(
                 },
             )
             _insert_model_predictions(connection, response)
+            _insert_audit_snapshot(
+                connection,
+                product=product,
+                response=response,
+                fetch_mode=fetch_mode,
+                extraction_signals=extraction_signals,
+            )
         return True
     except Exception as exc:
         logger.warning("scan_persistence_failed", extra={"error_type": type(exc).__name__})
@@ -363,6 +371,49 @@ def _insert_reviews(connection, product_id: str, product: ProductPageData) -> No
         )
 
 
+def _insert_scan_review_samples(
+    connection,
+    response: ProductAnalysisResponse,
+    product: ProductPageData,
+) -> None:
+    from sqlalchemy import text
+
+    for index, review in enumerate(product.reviews[:50]):
+        connection.execute(
+            text(
+                """
+                insert into scan_review_samples (
+                    prediction_run_id,
+                    review_hash,
+                    redacted_text,
+                    rating,
+                    verified_purchase,
+                    review_date,
+                    source_position
+                )
+                values (
+                    :prediction_run_id,
+                    :review_hash,
+                    :redacted_text,
+                    :rating,
+                    :verified_purchase,
+                    :review_date,
+                    :source_position
+                )
+                """
+            ),
+            {
+                "prediction_run_id": str(response.scan_id),
+                "review_hash": _hash_text(review.text),
+                "redacted_text": review.text[:500],
+                "rating": review.rating,
+                "verified_purchase": review.verified_purchase,
+                "review_date": review.date,
+                "source_position": index,
+            },
+        )
+
+
 def _insert_model_predictions(connection, response: ProductAnalysisResponse) -> None:
     from sqlalchemy import text
 
@@ -401,6 +452,119 @@ def _insert_model_predictions(connection, response: ProductAnalysisResponse) -> 
         )
 
 
+def _insert_audit_snapshot(
+    connection,
+    *,
+    product: ProductPageData,
+    response: ProductAnalysisResponse,
+    fetch_mode: str,
+    extraction_signals: list[str],
+) -> None:
+    from sqlalchemy import text
+
+    seller = product.seller.model_dump(mode="json") if product.seller else None
+    market_context = response.market_context.model_dump(mode="json") if response.market_context else {}
+    connection.execute(
+        text(
+            """
+            insert into prediction_run_audit (
+                prediction_run_id,
+                requested_target_market,
+                resolved_market,
+                resolved_country,
+                locale,
+                language,
+                product_snapshot,
+                evidence,
+                missing_inputs,
+                score_trace,
+                model_modes,
+                model_versions,
+                model_artifact_status,
+                recommendation_source,
+                market_reference,
+                extraction_profile
+            )
+            values (
+                :prediction_run_id,
+                :requested_target_market,
+                :resolved_market,
+                :resolved_country,
+                :locale,
+                :language,
+                cast(:product_snapshot as jsonb),
+                cast(:evidence as jsonb),
+                cast(:missing_inputs as jsonb),
+                cast(:score_trace as jsonb),
+                cast(:model_modes as jsonb),
+                cast(:model_versions as jsonb),
+                cast(:model_artifact_status as jsonb),
+                :recommendation_source,
+                cast(:market_reference as jsonb),
+                cast(:extraction_profile as jsonb)
+            )
+            on conflict (prediction_run_id) do nothing
+            """
+        ),
+        {
+            "prediction_run_id": str(response.scan_id),
+            "requested_target_market": market_context.get("requested_market"),
+            "resolved_market": market_context.get("resolved_market"),
+            "resolved_country": market_context.get("resolved_country"),
+            "locale": None,
+            "language": response.language,
+            "product_snapshot": json.dumps(
+                {
+                    "url": product.url,
+                    "site": product.site,
+                    "title": product.product_title,
+                    "product_image_url": product.product_image_url,
+                    "price": product.price,
+                    "currency": product.currency,
+                    "average_market_price": product.average_market_price,
+                    "market_reference_count": product.market_reference_count,
+                    "seller": seller,
+                    "return_policy": product.return_policy,
+                    "rating": product.rating,
+                    "review_count": product.review_count,
+                    "units_bought_recent": product.units_bought_recent,
+                },
+                ensure_ascii=False,
+            ),
+            "evidence": json.dumps([item.model_dump(mode="json") for item in response.evidence]),
+            "missing_inputs": json.dumps(response.missing_inputs),
+            "score_trace": json.dumps([item.model_dump(mode="json") for item in response.score_trace]),
+            "model_modes": json.dumps(response.model_modes),
+            "model_versions": json.dumps(response.model_versions),
+            "model_artifact_status": json.dumps(response.model_artifact_status),
+            "recommendation_source": response.recommendation_source,
+            "market_reference": json.dumps(
+                {
+                    "currency": product.currency,
+                    "average_market_price": product.average_market_price,
+                    "count": product.market_reference_count,
+                    "source": product.market_reference_source,
+                    "original_currency": product.market_reference_original_currency,
+                    "exchange_rate": product.market_reference_exchange_rate,
+                    "exchange_rate_source": product.market_reference_exchange_rate_source,
+                    "exchange_rate_date": product.market_reference_exchange_rate_date,
+                },
+                ensure_ascii=False,
+            ),
+            "extraction_profile": json.dumps(
+                {
+                    "fetch_mode": fetch_mode,
+                    "extraction_signals": extraction_signals,
+                    "page_type": response.page_type,
+                    "product_identity_confidence": response.product_identity_confidence,
+                    "canonical_product_url": response.canonical_product_url,
+                    "score_status": response.score_status,
+                }
+            ),
+        },
+    )
+
+
 def _normalize_url(url: str) -> str:
     parsed = urlparse(url)
     normalized = parsed._replace(fragment="")
@@ -423,6 +587,10 @@ def _hash_browser_id(browser_id: str | None) -> str | None:
         return None
     value = f"{settings.browser_id_hash_salt}:{browser_id}".encode("utf-8")
     return hashlib.sha256(value).hexdigest()
+
+
+def _hash_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _save_scan_local(
@@ -455,6 +623,14 @@ def _save_scan_local(
         "risk_level": response.risk_level,
         "confidence": response.confidence,
         "component_scores": response.component_scores.model_dump(),
+        "evidence": [item.model_dump(mode="json") for item in response.evidence],
+        "score_trace": [item.model_dump(mode="json") for item in response.score_trace],
+        "market_context": response.market_context.model_dump(mode="json")
+        if response.market_context
+        else None,
+        "score_status": response.score_status,
+        "page_type": response.page_type,
+        "product_identity_confidence": response.product_identity_confidence,
         "top_reasons": response.top_reasons,
         "recommendation": response.recommendation,
         "recommendation_source": response.recommendation_source,

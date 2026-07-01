@@ -1118,10 +1118,95 @@ select {
   color: var(--muted, #9aa3b2);
 }
 
+.score-limited {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--med-ring);
+  border-radius: 12px;
+  background: var(--med-bg);
+}
+
+.score-limited .limited-eyebrow {
+  margin-bottom: 4px;
+  color: var(--med);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.score-limited h3 {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.score-limited p,
+.confidence-note {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.confidence-note {
+  margin: 8px 2px 0;
+  color: var(--muted);
+}
+
+.market-context {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.market-context > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+}
+
+.market-context span,
+.market-context p {
+  color: var(--muted);
+}
+
+.market-context strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.market-context p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.fb-chip:focus-visible,
+.model-breakdown > summary:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
 .model-breakdown > summary {
   cursor: pointer;
   list-style: none;
 }
 .model-breakdown > summary::-webkit-details-marker {
   display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }

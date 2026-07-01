@@ -74,11 +74,16 @@ def scan_extracted_product(payload: ExtractedProductScanRequest) -> ProductAnaly
         *extra_signals,
         *market_signals,
     ]
+    page_type = _page_type_from_url(product.url)
     response = build_trustscore(
         product,
         fetch_mode="extension_dom",
         extraction_signals=extraction_signals,
         locale=payload.locale,
+        target_market=payload.target_market,
+        page_type=page_type,
+        product_identity_confidence=_identity_confidence_from_signals(extraction_signals, page_type),
+        canonical_product_url=None,
     )
     save_scan(
         product=product,
@@ -180,6 +185,10 @@ def _analyze_product_url(payload: ProductAnalysisRequest) -> ProductAnalysisResp
         fetch_mode=analysis.fetch_mode,
         extraction_signals=analysis.signals,
         locale=payload.locale,
+        target_market=payload.target_market,
+        page_type=analysis.page_type,
+        product_identity_confidence=analysis.product_identity_confidence,
+        canonical_product_url=analysis.canonical_product_url,
     )
     save_scan(
         product=analysis.product,
@@ -213,6 +222,14 @@ def _sanitize_extracted_product(
             "rating": _rating_or_none(product.seller.rating),
             "review_count": product.seller.review_count,
             "years_active": product.seller.years_active,
+            "sold_by": _truncate(product.seller.sold_by, 160),
+            "ships_from": _truncate(product.seller.ships_from, 160),
+            "fulfilled_by": _truncate(product.seller.fulfilled_by, 160),
+            "brand_store_name": _truncate(product.seller.brand_store_name, 160),
+            "is_platform_seller": product.seller.is_platform_seller,
+            "is_platform_fulfilled": product.seller.is_platform_fulfilled,
+            "is_official_store": product.seller.is_official_store,
+            "seller_source": _truncate(product.seller.seller_source, 80),
         }
     currency = normalize_currency_code(_truncate(product.currency, 16))
     price = product.price
@@ -333,7 +350,8 @@ def _rating_or_none(value: float | None) -> float | None:
 
 
 def _signals_from_extracted_product(product: ProductPageData) -> list[str]:
-    signals = ["extension_dom", "title"]
+    page_type = _page_type_from_url(product.url)
+    signals = ["extension_dom", "title", f"page_type:{page_type}"]
     host = (product.site or urlparse(product.url).hostname or "").lower()
     if "amazon." in host:
         signals.append("site_amazon")
@@ -354,3 +372,38 @@ def _signals_from_extracted_product(product: ProductPageData) -> list[str]:
     if product.return_policy:
         signals.append("policy")
     return signals
+
+
+def _page_type_from_url(url: str) -> str:
+    path = (urlparse(url).path or "").lower()
+    if any(token in path for token in ("/cart", "/checkout", "/basket")):
+        return "cart"
+    if any(token in path for token in ("/account", "/signin", "/login")):
+        return "account"
+    if "/review" in path or "/reviews" in path:
+        return "review_page"
+    if "/search" in path:
+        return "search"
+    if any(token in path for token in ("/category", "/browse")):
+        return "category"
+    if any(token in path for token in ("/dp/", "/gp/product/", "/product", "/products/", "/item/", "/itm/")):
+        return "product"
+    if "bestbuy.com" in (urlparse(url).hostname or "") and path.endswith(".p"):
+        return "product"
+    return "unknown"
+
+
+def _identity_confidence_from_signals(signals: list[str], page_type: str) -> float:
+    if page_type in {"review_page", "search", "category", "cart", "account"}:
+        return 0.0
+    strong_signals = {
+        "price",
+        "seller",
+        "rating_or_review_count",
+        "review_text",
+        "image",
+        "policy",
+    }
+    count = len(strong_signals & set(signals))
+    base = 0.25 if "title" in signals else 0.0
+    return round(min(1.0, base + count * 0.15), 2)

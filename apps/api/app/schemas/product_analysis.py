@@ -7,8 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 RiskLevel = Literal["Low Risk", "Medium Risk", "High Risk"]
+ScoreStatus = Literal["scored", "low_evidence_triage"]
+PageType = Literal["product", "review_page", "search", "category", "cart", "account", "unknown"]
 FeedbackStatus = Literal["saved", "accepted"]
 TargetMarket = Literal["auto", "US", "JP", "EU", "UK"]
+TraceStatus = Literal["scored", "not_scored", "fallback", "missing_evidence"]
 ComponentKey = Literal[
     "review_authenticity",
     "seller_reliability",
@@ -25,6 +28,10 @@ FeedbackIssueCategory = Literal[
     "wrong_reviews",
     "wrong_price",
     "wrong_policy",
+    "wrong_page_type",
+    "wrong_market",
+    "wrong_currency",
+    "wrong_extracted_field",
     "missing_evidence",
     "other",
 ]
@@ -49,6 +56,14 @@ class SellerInfo(StrictBaseModel):
     rating: float | None = Field(default=None, ge=0, le=5, examples=[4.6])
     review_count: int | None = Field(default=None, ge=0, examples=[5000])
     years_active: int | None = Field(default=None, ge=0, examples=[3])
+    sold_by: str | None = Field(default=None, max_length=160, examples=["Example Store"])
+    ships_from: str | None = Field(default=None, max_length=160, examples=["Amazon"])
+    fulfilled_by: str | None = Field(default=None, max_length=160, examples=["Amazon"])
+    brand_store_name: str | None = Field(default=None, max_length=160, examples=["Apple Store"])
+    is_platform_seller: bool | None = Field(default=None, examples=[True])
+    is_platform_fulfilled: bool | None = Field(default=None, examples=[True])
+    is_official_store: bool | None = Field(default=None, examples=[True])
+    seller_source: str | None = Field(default=None, max_length=80, examples=["byline"])
 
 
 class ReviewInput(StrictBaseModel):
@@ -158,6 +173,14 @@ class ExtractedSellerInfo(LenientBaseModel):
     rating: float | None = Field(default=None, ge=0)
     review_count: int | None = Field(default=None, ge=0)
     years_active: int | None = Field(default=None, ge=0)
+    sold_by: str | None = Field(default=None, max_length=1000)
+    ships_from: str | None = Field(default=None, max_length=1000)
+    fulfilled_by: str | None = Field(default=None, max_length=1000)
+    brand_store_name: str | None = Field(default=None, max_length=1000)
+    is_platform_seller: bool | None = None
+    is_platform_fulfilled: bool | None = None
+    is_official_store: bool | None = None
+    seller_source: str | None = Field(default=None, max_length=200)
 
 
 class ExtractedReviewInput(LenientBaseModel):
@@ -243,6 +266,28 @@ class ComponentEvidence(StrictBaseModel):
     confidence: float = Field(..., ge=0, le=1)
 
 
+class MarketContext(StrictBaseModel):
+    """Market and currency context used for scan interpretation."""
+
+    requested_market: TargetMarket = "auto"
+    resolved_market: str = Field(..., max_length=16)
+    resolved_country: str | None = Field(default=None, max_length=16)
+    expected_currency: str = Field(..., max_length=16)
+    listed_currency: str | None = Field(default=None, max_length=16)
+
+
+class ScoreTraceItem(StrictBaseModel):
+    """One component's public score trace."""
+
+    component: ComponentKey
+    score: int | None = Field(default=None, ge=0, le=100)
+    status: TraceStatus
+    mode: str = Field(..., max_length=120)
+    confidence: float = Field(..., ge=0, le=1)
+    evidence: list[str] = Field(default_factory=list, max_length=5)
+    missing_inputs: list[str] = Field(default_factory=list, max_length=8)
+
+
 class ProductAnalysisResponse(StrictBaseModel):
     """Structured analysis response returned to the extension frontend."""
 
@@ -271,6 +316,12 @@ class ProductAnalysisResponse(StrictBaseModel):
     model_modes: dict[str, str] = Field(default_factory=dict)
     model_artifact_status: dict[str, Any] = Field(default_factory=dict)
     model_versions: dict[str, str] = Field(default_factory=dict)
+    score_status: ScoreStatus = "scored"
+    page_type: PageType = "product"
+    product_identity_confidence: float = Field(default=1.0, ge=0, le=1)
+    canonical_product_url: str | None = Field(default=None, max_length=8192)
+    market_context: MarketContext | None = None
+    score_trace: list[ScoreTraceItem] = Field(default_factory=list, max_length=6)
     is_mock: bool = False
 
 

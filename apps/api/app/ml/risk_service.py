@@ -15,9 +15,12 @@ from app.core.config import settings
 from app.schemas.product_analysis import ProductPageData, SellerInfo
 
 
-TIME_PERIOD_RE = re.compile(r"\b\d+\s*-?\s*(day|days|week|weeks|month|months)\b", re.I)
-RETURN_KEYWORDS = ("return", "refund")
-WARRANTY_KEYWORDS = ("warranty", "exchange", "replacement")
+TIME_PERIOD_RE = re.compile(
+    r"\b\d+\s*-?\s*(day|days|week|weeks|month|months|jours?)\b|\d+\s*日以内|30日",
+    re.I,
+)
+RETURN_KEYWORDS = ("return", "refund", "retour", "remboursement", "返品", "返金")
+WARRANTY_KEYWORDS = ("warranty", "exchange", "replacement", "garantie", "échange", "echange", "交換", "保証")
 logger = logging.getLogger(__name__)
 
 
@@ -219,8 +222,19 @@ def _score_seller_rules(
     parts: list[tuple[float, float]] = []
     completeness = 0.15 if (seller and seller.name) else 0.0
     has_direct_signal = False
+    has_popularity_signal = False
 
     if seller is not None:
+        official_store = bool(seller.is_official_store or _looks_like_official_store(seller.name))
+        if seller.is_platform_seller or official_store:
+            parts.append((90.0 if official_store else 84.0, 0.65))
+            completeness += 0.55
+            has_direct_signal = True
+        elif seller.is_platform_fulfilled:
+            parts.append((78.0, 0.35))
+            completeness += 0.25
+            has_direct_signal = True
+
         if seller.rating is not None:
             parts.append((seller.rating / 5 * 100, 0.55))
             completeness += 0.45
@@ -239,6 +253,7 @@ def _score_seller_rules(
             has_direct_signal = True
 
     if popularity is not None:
+        has_popularity_signal = True
         pop_score, pop_completeness = popularity
         if has_direct_signal:
             # Direct seller signals lead; popularity only nudges the result.
@@ -256,7 +271,10 @@ def _score_seller_rules(
 
     weighted = sum(score * weight for score, weight in parts)
     total_weight = sum(weight for _, weight in parts)
-    return _clamp_score(weighted / total_weight), min(1.0, completeness)
+    score = _clamp_score(weighted / total_weight)
+    if seller is not None and seller.name and not has_direct_signal and not has_popularity_signal:
+        score = min(score, 60)
+    return score, min(1.0, completeness)
 
 
 def _popularity_signal(payload: ProductPageData) -> tuple[float, float] | None:
@@ -436,6 +454,10 @@ def _seller_text(payload: ProductPageData) -> str:
         value
         for value in [
             payload.seller.name if payload.seller else None,
+            payload.seller.sold_by if payload.seller else None,
+            payload.seller.ships_from if payload.seller else None,
+            payload.seller.fulfilled_by if payload.seller else None,
+            payload.seller.brand_store_name if payload.seller else None,
             payload.product_title,
             payload.site,
         ]
@@ -449,6 +471,18 @@ def _price_text(payload: ProductPageData) -> str:
         for value in [payload.product_title, payload.description, payload.site]
         if value
     ).lower()
+
+
+def _looks_like_official_store(value: str | None) -> bool:
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"\b(Apple|Amazon|Logitech|StarTech|Sony|Samsung|Microsoft|Anker|Belkin|Dell|HP)\b.*\b(Store|Official)\b",
+            value,
+            re.I,
+        )
+    )
 
 
 def _load_artifact(raw_path: str | None, filename: str) -> tuple[Any | None, dict[str, Any] | None]:

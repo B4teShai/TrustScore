@@ -124,6 +124,10 @@ def test_scan_extracted_scores_active_tab_product_data() -> None:
     assert body["product"]["seller_name"] == "Amazon Essentials Store"
     assert body["missing_inputs"] == ["visible review text"]
     assert body["model_modes"]["price_safety"] == "not_scored_missing_market_reference"
+    assert body["score_status"] in {"scored", "low_evidence_triage"}
+    assert body["page_type"] == "product"
+    assert body["market_context"]["resolved_market"] == "US"
+    assert body["score_trace"]
     evidence = {item["component"]: item for item in body["evidence"]}
     assert "No verified market reference found." in evidence["price_safety"]["evidence"]
 
@@ -395,6 +399,7 @@ def test_scan_extracted_keeps_same_market_jpy_price_without_market_reference() -
     assert body["product"]["price"] == 2659
     assert body["product"]["currency"] == "JPY"
     assert body["model_modes"]["price_safety"] == "not_scored_missing_market_reference"
+    assert body["market_context"]["resolved_market"] == "JP"
     assert evidence["price_safety"]["evidence"] == [
         "Listed price only: JPY 2,659",
         "No verified market reference found.",
@@ -497,6 +502,61 @@ def test_scan_extracted_scores_supported_jpy_with_jpy_market_reference(monkeypat
         "Converted market reference from USD: 1 USD = JPY 156 (Frankfurter, 2026-06-30)",
     ]
     assert evidence["price_safety"]["missing_inputs"] == []
+
+
+def test_scan_extracted_scores_japanese_policy_and_official_store() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "target_market": "JP",
+            "locale": "ja-JP",
+            "product": {
+                "url": "https://www.amazon.co.jp/dp/B0TESTJP14",
+                "site": "www.amazon.co.jp",
+                "product_title": "Magic Trackpad (USB-C)",
+                "price": 16800,
+                "currency": "JPY",
+                "seller": {
+                    "name": "Apple Store",
+                    "brand_store_name": "Apple Store",
+                    "is_official_store": True,
+                },
+                "return_policy": "この商品は30日以内の返品と返金に対応しています。",
+                "reviews": [{"text": "反応が良く、品質も高いです。", "rating": 5}],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    evidence = {item["component"]: item for item in body["evidence"]}
+    assert body["model_modes"]["return_policy_clarity"] != "not_scored_missing_policy"
+    assert body["component_scores"]["seller_reliability"] >= 70
+    assert any("official brand store" in item for item in evidence["seller_reliability"]["evidence"])
+
+
+def test_scan_extracted_marks_review_page_as_low_evidence() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "product": {
+                "url": "https://www.bestbuy.com/site/reviews/logitech-mouse/6282602",
+                "site": "www.bestbuy.com",
+                "product_title": "Customer Ratings & Reviews",
+                "reviews": [{"text": "Comfortable mouse after long use."}],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["page_type"] == "review_page"
+    assert body["score_status"] == "low_evidence_triage"
+    assert body["product_identity_confidence"] == 0
 
 
 def test_scan_returns_product_not_detected(monkeypatch) -> None:

@@ -30,8 +30,12 @@ PRICE_SUFFIX_RE = re.compile(
 )
 RATING_RE = re.compile(r"([0-5](?:\.[0-9])?)\s*(?:out of 5|stars?)", re.I)
 REVIEW_COUNT_RE = re.compile(r"([0-9][0-9,]*)\s+(?:ratings?|reviews?)", re.I)
-POLICY_RE = re.compile(r"(.{0,120}(?:return|refund|exchange|warranty).{0,220})", re.I)
+POLICY_RE = re.compile(
+    r"(.{0,120}(?:return|refund|exchange|warranty|retour|remboursement|garantie|返品|返金|交換|保証).{0,220})",
+    re.I,
+)
 PRODUCT_URL_RE = re.compile(r"/(dp|gp/product|product|products|item|itm)/", re.I)
+BESTBUY_PRODUCT_URL_RE = re.compile(r"/site/[^/?#]+/\d+\.p(?:$|[?#])", re.I)
 BOUGHT_RECENT_RE = re.compile(
     r"([0-9][0-9.,]*)\s*([KkMm])?\+?\s+bought\s+in\s+past\s+month", re.I
 )
@@ -39,14 +43,19 @@ POLICY_ACCEPT_RE = re.compile(
     r"\b("
     r"return\s+policy|returns\s+policy|refund(?:s|ed|able)?|exchange|warranty|"
     r"replacement|returnable|eligible\s+for\s+returns?|free\s+returns?|return\s+window|"
-    r"within\s+\d+\s*-?\s*(?:day|days|week|weeks|month|months)"
-    r")\b",
+    r"within\s+\d+\s*-?\s*(?:day|days|week|weeks|month|months)|"
+    r"retour|remboursement|échange|echange|garantie|"
+    r"返品|返金|交換|保証|返品無料"
+    r")\b|(?:返品|返金|交換|保証|返品無料|\d+\s*日以内|30日)",
     re.I,
 )
 POLICY_TIME_RE = re.compile(
     r"("
     r"\b\d+\s*-?\s*(?:day|days|week|weeks|month|months)\b.{0,80}\breturns?\b|"
-    r"\breturns?\b.{0,80}\b\d+\s*-?\s*(?:day|days|week|weeks|month|months)\b"
+    r"\breturns?\b.{0,80}\b\d+\s*-?\s*(?:day|days|week|weeks|month|months)\b|"
+    r"\b\d+\s*jours?\b.{0,80}\b(?:retour|remboursement|échange|echange)\b|"
+    r"\b(?:retour|remboursement|échange|echange)\b.{0,80}\b\d+\s*jours?\b|"
+    r"\d+\s*日以内|30日.{0,40}(?:返品|返金|交換)"
     r")",
     re.I,
 )
@@ -57,7 +66,8 @@ POLICY_NAV_NOISE_RE = re.compile(
 )
 POLICY_START_RE = re.compile(
     r"\b(this item|item|eligible|free returns?|returns?|return policy|returns policy|refund|"
-    r"exchange|warranty|replacement|returnable)\b",
+    r"exchange|warranty|replacement|returnable|retour|remboursement|garantie)\b|"
+    r"(返品|返金|交換|保証|返品無料)",
     re.I,
 )
 REVIEW_BOILERPLATE_RE = re.compile(
@@ -79,6 +89,9 @@ class ExtractionResult:
     product: ProductPageData | None
     reason: str
     signals: list[str] = field(default_factory=list)
+    page_type: str = "unknown"
+    product_identity_confidence: float = 0.0
+    canonical_product_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -369,6 +382,71 @@ ETSY_PROFILE = MarketplaceProfile(
 )
 
 
+BESTBUY_PROFILE = MarketplaceProfile(
+    site_signal="site_bestbuy",
+    title_selectors=(
+        "h1.heading-5",
+        "h1[data-testid='product-title']",
+        ".sku-title h1",
+        "[data-testid='product-title']",
+        "meta[property='og:title']",
+    ),
+    image_selectors=(
+        "meta[property='og:image']",
+        ".primary-image",
+        "[data-testid='product-image'] img",
+        "img[srcset]",
+    ),
+    price_selectors=(
+        "[data-testid='customer-price']",
+        ".priceView-customer-price span",
+        ".pricing-price__regular-price",
+        "[class*='priceView'] span",
+        "meta[property='product:price:amount']",
+    ),
+    seller_selectors=(
+        "[data-testid='brand-name']",
+        ".vendor-display-name",
+        "[class*='seller']",
+        "[itemprop='brand']",
+        "meta[property='product:brand']",
+    ),
+    rating_selectors=(
+        "[data-testid='ratings-and-reviews']",
+        "[aria-label*='out of 5']",
+        ".c-ratings-reviews",
+    ),
+    review_count_selectors=(
+        "[data-testid='ratings-and-reviews']",
+        "a[href*='/site/reviews/']",
+        "[aria-label*='reviews']",
+    ),
+    description_selectors=(
+        "[data-testid='product-description']",
+        ".shop-product-description",
+        "meta[name='description']",
+    ),
+    policy_selectors=(
+        "[data-testid*='return']",
+        "[class*='fulfillment-return']",
+        "[class*='return']",
+        "[id*='return']",
+    ),
+    review_card_selectors=(
+        "[data-testid*='review-card']",
+        ".review-item",
+        ".ugc-review",
+        "[class*='review-item']",
+    ),
+    review_body_selectors=(
+        "[data-testid*='review-text']",
+        ".review-text",
+        ".ugc-review-body",
+        "p",
+    ),
+)
+
+
 def extract_product_page(
     html: str,
     url: str,
@@ -380,6 +458,8 @@ def extract_product_page(
     soup = BeautifulSoup(html, "html.parser")
     page_text = soup.get_text(" ", strip=True)
     profile = _profile_for_url(url)
+    page_type = _page_type_for_url(url)
+    canonical_product_url = _canonical_product_url_from_page(soup, url)
     resolved_market = resolve_target_market(target_market, url=url, locale=locale)
     expected_currency = expected_currency_for_market(resolved_market)
     product_objects = _json_ld_products(soup)
@@ -391,6 +471,8 @@ def extract_product_page(
             detected=False,
             product=None,
             reason="No clear product title was found.",
+            page_type=page_type,
+            canonical_product_url=canonical_product_url,
         )
 
     price_result = _extract_price_and_currency(
@@ -404,7 +486,7 @@ def extract_product_page(
     seller = _extract_seller(soup, page_text, product_objects, profile)
     reviews = _extract_reviews(soup, product_objects, profile)
     product = ProductPageData(
-        url=url,
+        url=canonical_product_url or url,
         site=site,
         product_title=title,
         description=_extract_description(soup, product_objects, profile),
@@ -419,9 +501,17 @@ def extract_product_page(
         review_count=_extract_review_count(soup, page_text, product_objects, profile),
         units_bought_recent=_extract_units_bought_recent(page_text),
     )
-    signals = _product_signals(product, page_text, bool(product_objects), url)
+    signals = _product_signals(
+        product,
+        page_text,
+        bool(product_objects),
+        url,
+        page_type=page_type,
+        canonical_product_url=canonical_product_url,
+    )
     if price_result.ignored_currency:
         signals.append(f"price_ignored_localized_currency:{price_result.ignored_currency}")
+    identity_confidence = _product_identity_confidence(signals)
     detected = _is_product_detail(signals)
     return ExtractionResult(
         detected=detected,
@@ -432,6 +522,9 @@ def extract_product_page(
             else "This page does not have enough product-detail signals."
         ),
         signals=signals,
+        page_type=page_type,
+        product_identity_confidence=identity_confidence,
+        canonical_product_url=canonical_product_url,
     )
 
 
@@ -477,6 +570,8 @@ def _profile_for_url(url: str) -> MarketplaceProfile:
         return EBAY_PROFILE
     if host.endswith("etsy.com") or ".etsy." in host:
         return ETSY_PROFILE
+    if host.endswith("bestbuy.com") or ".bestbuy." in host:
+        return BESTBUY_PROFILE
     return GENERIC_PROFILE
 
 
@@ -557,11 +652,39 @@ def _extract_price_and_currency(
         if price is not None:
             candidates.append((price, parsed_currency or page_currency))
 
+    for value in _split_price_texts(soup):
+        price, parsed_currency = _parse_price_text(value, allow_without_currency=True)
+        if price is not None:
+            candidates.append((price, parsed_currency or page_currency))
+
     price, parsed_currency = _parse_price_text(page_text, allow_without_currency=False)
     if price is not None:
         candidates.append((price, parsed_currency))
 
     return _select_price_candidate(candidates, expected_currency=expected_currency, url=url)
+
+
+def _split_price_texts(soup: BeautifulSoup) -> list[str]:
+    values: list[str] = []
+    containers = soup.select(
+        "#corePriceDisplay_desktop_feature_div, #apex_desktop, #corePrice_feature_div, .a-price"
+    )
+    for container in containers:
+        symbol = _element_text(container.select_one(".a-price-symbol"))
+        whole = _element_text(container.select_one(".a-price-whole"))
+        fraction = _element_text(container.select_one(".a-price-fraction"))
+        if not whole:
+            continue
+        compact_whole = whole.replace(" ", "").rstrip(".,")
+        if symbol and fraction:
+            values.append(f"{symbol}{compact_whole}.{fraction}")
+        elif symbol:
+            values.append(f"{symbol}{compact_whole}")
+        elif fraction:
+            values.append(f"{compact_whole}.{fraction}")
+        else:
+            values.append(compact_whole)
+    return values
 
 
 def _extract_rating(
@@ -604,10 +727,14 @@ def _extract_review_count(
 
     for selector in (*profile.review_count_selectors, *GENERIC_PROFILE.review_count_selectors):
         element = soup.select_one(selector)
-        count = _parse_int(_element_text(element))
+        text_value = _element_text(element)
+        count_match = REVIEW_COUNT_RE.search(text_value or "")
+        count = _parse_int(count_match.group(1)) if count_match else _parse_int(text_value)
         if count is None and element is not None:
             for attribute in ("content", "data-reviews-total-count", "aria-label"):
-                count = _parse_int(element.get(attribute))
+                attribute_value = element.get(attribute)
+                count_match = REVIEW_COUNT_RE.search(attribute_value or "")
+                count = _parse_int(count_match.group(1)) if count_match else _parse_int(attribute_value)
                 if count is not None:
                     break
         if count is not None:
@@ -624,15 +751,18 @@ def _extract_seller(
     profile: MarketplaceProfile,
 ) -> SellerInfo | None:
     name: str | None = None
+    source: str | None = None
     for product in products:
         seller = _seller_from_unknown(product.get("seller") or product.get("brand"))
         if seller:
             name = seller
+            source = "structured"
             break
         for offer in _as_list(product.get("offers")):
             seller = _seller_from_unknown(offer.get("seller") if isinstance(offer, dict) else None)
             if seller:
                 name = seller
+                source = "structured_offer"
                 break
         if name:
             break
@@ -642,9 +772,11 @@ def _extract_seller(
             seller = _clean_seller(_element_text(soup.select_one(selector)))
             if seller:
                 name = seller
+                source = "byline" if "byline" in selector.lower() else "selector"
                 break
     if not name:
         name = _clean_seller(page_text)
+        source = "page_text" if name else None
 
     reputation_text = " ".join(
         _selector_texts(
@@ -656,7 +788,50 @@ def _extract_seller(
     seller_rating, seller_review_count = _extract_seller_reputation(reputation_text)
     if not name and seller_rating is None and seller_review_count is None:
         return None
-    return SellerInfo(name=name, rating=seller_rating, review_count=seller_review_count)
+    sold_by = _extract_labeled_party(page_text, "Sold by")
+    ships_from = _extract_labeled_party(page_text, "Ships from")
+    fulfilled_by = _extract_labeled_party(page_text, "Fulfilled by")
+    is_platform = _is_platform_party(name) or _is_platform_party(sold_by)
+    is_fulfilled = _is_platform_party(fulfilled_by) or _is_platform_party(ships_from)
+    is_official = _looks_like_official_store(name)
+    return SellerInfo(
+        name=name,
+        rating=seller_rating,
+        review_count=seller_review_count,
+        sold_by=sold_by,
+        ships_from=ships_from,
+        fulfilled_by=fulfilled_by,
+        brand_store_name=name if is_official else None,
+        is_platform_seller=is_platform or None,
+        is_platform_fulfilled=is_fulfilled or None,
+        is_official_store=is_official or None,
+        seller_source=source,
+    )
+
+
+def _extract_labeled_party(page_text: str, label: str) -> str | None:
+    match = re.search(rf"\b{re.escape(label)}\s+(.+?)(?:\s+Ships from|\s+Sold by|\s+Fulfilled by|\s*$)", page_text, re.I)
+    if not match:
+        return None
+    return _clean_seller(match.group(1))
+
+
+def _is_platform_party(value: str | None) -> bool:
+    if not value:
+        return False
+    return bool(re.search(r"\b(Amazon|Best Buy|Walmart|Target|Etsy|eBay)\b", value, re.I))
+
+
+def _looks_like_official_store(value: str | None) -> bool:
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"\b(Apple|Amazon|Logitech|StarTech|Sony|Samsung|Microsoft|Anker|Belkin|Dell|HP)\b.*\b(Store|Official)\b",
+            value,
+            re.I,
+        )
+    )
 
 
 def _extract_policy(
@@ -666,6 +841,11 @@ def _extract_policy(
 ) -> str | None:
     for selector in (*profile.policy_selectors, *GENERIC_PROFILE.policy_selectors):
         policy = clean_policy_snippet(_element_text(soup.select_one(selector)))
+        if policy:
+            return policy
+
+    for element in soup.find_all(("p", "li", "div", "span")):
+        policy = clean_policy_snippet(_element_text(element))
         if policy:
             return policy
 
@@ -695,6 +875,9 @@ def clean_policy_snippet(value: str | None) -> str | None:
 
 
 def _focus_policy_snippet(value: str) -> str:
+    sentence_end = re.search(r"(?<=[.!?])\s+", value)
+    if len(value) <= 180 and _has_strong_policy_detail(value) and sentence_end is None:
+        return value
     anchor = POLICY_TIME_RE.search(value) or POLICY_ACCEPT_RE.search(value)
     if not anchor:
         return value
@@ -718,7 +901,8 @@ def _has_strong_policy_detail(value: str) -> bool:
     return bool(
         re.search(
             r"\b(refund|exchange|warranty|replacement|returnable|eligible\s+for\s+returns?|"
-            r"free\s+returns?|return\s+policy|returns\s+policy)\b",
+            r"free\s+returns?|return\s+policy|returns\s+policy|retour|remboursement|"
+            r"échange|echange|garantie)\b|(?:返品|返金|交換|保証|返品無料|30日|\d+\s*日以内)",
             value,
             flags=re.I,
         )
@@ -821,10 +1005,16 @@ def _product_signals(
     page_text: str,
     has_structured_product: bool,
     url: str,
+    *,
+    page_type: str,
+    canonical_product_url: str | None,
 ) -> list[str]:
     signals: list[str] = []
     if has_structured_product:
         signals.append("structured_product")
+    signals.append(f"page_type:{page_type}")
+    if canonical_product_url:
+        signals.append("canonical_product_url_found")
     site_signal = _site_signal(url)
     if site_signal:
         signals.append(site_signal)
@@ -846,13 +1036,18 @@ def _product_signals(
         signals.append("policy_rejected_noisy_text")
     if re.search(r"\b(add to cart|add to bag|buy now|checkout|in stock)\b", page_text, re.I):
         signals.append("commerce_action")
-    if PRODUCT_URL_RE.search(urlparse(url).path):
+    if PRODUCT_URL_RE.search(urlparse(url).path) or BESTBUY_PRODUCT_URL_RE.search(urlparse(url).path):
         signals.append("product_url")
     return signals
 
 
 def _is_product_detail(signals: list[str]) -> bool:
     has = signals.__contains__
+    page_type = _signal_value(signals, "page_type:") or "unknown"
+    if page_type in {"review_page", "search", "category", "cart", "account"} and not (
+        has("structured_product") or has("canonical_product_url_found")
+    ):
+        return False
     commerce = (
         has("price")
         or has("commerce_action")
@@ -864,6 +1059,22 @@ def _is_product_detail(signals: list[str]) -> bool:
         return True
     if has("title") and has("price") and (has("seller") or has("rating_or_review_count") or has("commerce_action")):
         return True
+    product_signal_count = sum(
+        1
+        for signal in (
+            "price",
+            "seller",
+            "rating_or_review_count",
+            "review_text",
+            "image",
+            "commerce_action",
+            "structured_product",
+            "product_url",
+        )
+        if has(signal)
+    )
+    if product_signal_count < 2:
+        return False
     score = sum(
         {
             "structured_product": 3,
@@ -882,6 +1093,36 @@ def _is_product_detail(signals: list[str]) -> bool:
     return score >= 6 and has("title") and commerce
 
 
+def _product_identity_confidence(signals: list[str]) -> float:
+    if not _is_product_detail(signals):
+        return 0.0
+    has = signals.__contains__
+    score = 0.15 if has("title") else 0.0
+    for signal, weight in (
+        ("structured_product", 0.25),
+        ("product_url", 0.15),
+        ("canonical_product_url_found", 0.10),
+        ("price", 0.15),
+        ("seller", 0.12),
+        ("rating_or_review_count", 0.10),
+        ("image", 0.08),
+        ("commerce_action", 0.05),
+    ):
+        if has(signal):
+            score += weight
+    page_type = _signal_value(signals, "page_type:") or "unknown"
+    if page_type != "product":
+        score = min(score, 0.65)
+    return round(max(0.0, min(1.0, score)), 2)
+
+
+def _signal_value(signals: list[str], prefix: str) -> str | None:
+    for signal in signals:
+        if signal.startswith(prefix):
+            return signal.removeprefix(prefix)
+    return None
+
+
 def _site_signal(url: str) -> str | None:
     host = (urlparse(url).hostname or "").lower()
     if "amazon." in host:
@@ -890,6 +1131,41 @@ def _site_signal(url: str) -> str | None:
         return "site_ebay"
     if host.endswith("etsy.com") or ".etsy." in host:
         return "site_etsy"
+    if host.endswith("bestbuy.com") or ".bestbuy." in host:
+        return "site_bestbuy"
+    return None
+
+
+def _page_type_for_url(url: str) -> str:
+    path = (urlparse(url).path or "").lower()
+    if re.search(r"/(cart|checkout|basket|account|signin|login)(?:/|$)", path):
+        return "cart" if "cart" in path or "basket" in path or "checkout" in path else "account"
+    if re.search(r"/(search|s)(?:/|$)", path) or "search" in path:
+        return "search"
+    if re.search(r"/(category|categories|browse|b)(?:/|$)", path):
+        return "category"
+    if re.search(r"/reviews?(?:/|$)", path):
+        return "review_page"
+    if PRODUCT_URL_RE.search(path) or BESTBUY_PRODUCT_URL_RE.search(path):
+        return "product"
+    return "unknown"
+
+
+def _canonical_product_url_from_page(soup: BeautifulSoup, page_url: str) -> str | None:
+    host = (urlparse(page_url).hostname or "").lower()
+    if not (host.endswith("bestbuy.com") or ".bestbuy." in host):
+        return None
+    for selector in ("link[rel='canonical']", "a[href*='/site/'][href*='.p']", "meta[property='og:url']"):
+        element = soup.select_one(selector)
+        raw = None
+        if element is not None:
+            raw = element.get("href") or element.get("content")
+        if not raw:
+            continue
+        candidate = urljoin(page_url, raw)
+        parsed = urlparse(candidate)
+        if (parsed.hostname or "").lower().endswith("bestbuy.com") and BESTBUY_PRODUCT_URL_RE.search(parsed.path):
+            return urlunparse(parsed._replace(fragment=""))
     return None
 
 

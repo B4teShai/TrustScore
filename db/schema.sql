@@ -79,6 +79,11 @@ create index if not exists idx_prediction_runs_browser_created_at
     on prediction_runs(browser_id_hash, created_at desc)
     where browser_id_hash is not null;
 
+create index if not exists idx_prediction_runs_model_created_at
+    on prediction_runs(model_version_id, created_at desc);
+create index if not exists idx_prediction_runs_fetch_mode_created_at
+    on prediction_runs(fetch_mode, created_at desc);
+
 create table if not exists model_predictions (
     id uuid primary key default gen_random_uuid(),
     prediction_run_id uuid not null references prediction_runs(id) on delete cascade,
@@ -89,6 +94,49 @@ create table if not exists model_predictions (
 );
 
 create index if not exists idx_model_predictions_run_id on model_predictions(prediction_run_id);
+create unique index if not exists idx_model_predictions_run_model
+    on model_predictions(prediction_run_id, model_name);
+
+create table if not exists prediction_run_audit (
+    prediction_run_id uuid primary key references prediction_runs(id) on delete cascade,
+    requested_target_market text,
+    resolved_market text,
+    resolved_country text,
+    locale text,
+    language text,
+    product_snapshot jsonb not null default '{}'::jsonb,
+    evidence jsonb not null default '[]'::jsonb,
+    missing_inputs jsonb not null default '[]'::jsonb,
+    score_trace jsonb not null default '[]'::jsonb,
+    model_modes jsonb not null default '{}'::jsonb,
+    model_versions jsonb not null default '{}'::jsonb,
+    model_artifact_status jsonb not null default '{}'::jsonb,
+    recommendation_source text,
+    market_reference jsonb not null default '{}'::jsonb,
+    extraction_profile jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now()
+);
+
+create index if not exists idx_prediction_run_audit_market_created
+    on prediction_run_audit(resolved_market, created_at desc);
+create index if not exists idx_prediction_run_audit_country_created
+    on prediction_run_audit(resolved_country, created_at desc);
+
+create table if not exists scan_review_samples (
+    id uuid primary key default gen_random_uuid(),
+    prediction_run_id uuid not null references prediction_runs(id) on delete cascade,
+    review_hash text not null,
+    redacted_text text,
+    rating double precision check (rating is null or (rating >= 0 and rating <= 5)),
+    verified_purchase boolean,
+    review_date text,
+    source_position integer check (source_position is null or source_position >= 0),
+    retention_class text not null default 'short_lived',
+    created_at timestamptz not null default now()
+);
+
+create index if not exists idx_scan_review_samples_run_id
+    on scan_review_samples(prediction_run_id);
 
 create table if not exists user_feedback (
     id uuid primary key default gen_random_uuid(),
@@ -104,6 +152,10 @@ create table if not exists user_feedback (
             'wrong_reviews',
             'wrong_price',
             'wrong_policy',
+            'wrong_page_type',
+            'wrong_market',
+            'wrong_currency',
+            'wrong_extracted_field',
             'missing_evidence',
             'other'
         )
