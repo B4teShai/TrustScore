@@ -133,7 +133,7 @@ class Settings:
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
     ai_feedback_enabled: bool = _get_bool("AI_FEEDBACK_ENABLED", True)
     ai_feedback_max_tokens: int = int(os.getenv("AI_FEEDBACK_MAX_TOKENS", "320"))
-    ai_feedback_timeout_seconds: float = _get_float("AI_FEEDBACK_TIMEOUT_SECONDS", 12.0)
+    ai_feedback_timeout_seconds: float = _get_float("AI_FEEDBACK_TIMEOUT_SECONDS", 3.0)
 
     # Local persistence fallback: when no DATABASE_URL is configured, each scored
     # page (and the AI feedback used) is still saved to this JSONL file so demos

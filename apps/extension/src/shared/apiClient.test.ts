@@ -9,6 +9,8 @@ import {
 } from "./apiClient";
 import type { ProductAnalysisResponse } from "./types";
 
+const API_BASE_URL = "https://walrus-app-38mjb.ondigitalocean.app";
+
 const productResponse: ProductAnalysisResponse = {
   scan_id: "11111111-1111-4111-8111-111111111111",
   product: {
@@ -79,7 +81,7 @@ describe("apiClient", () => {
 
     expect(result.scan_id).toBe(productResponse.scan_id);
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/v1/scan",
+      `${API_BASE_URL}/api/v1/scan`,
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ url: "https://example.com/product/123" }),
@@ -103,7 +105,7 @@ describe("apiClient", () => {
 
     expect(result.scan_id).toBe(productResponse.scan_id);
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/v1/scan-extracted",
+      `${API_BASE_URL}/api/v1/scan-extracted`,
       expect.objectContaining({
         method: "POST",
       }),
@@ -135,7 +137,7 @@ describe("apiClient", () => {
 
     expect(result.scan_id).toBe(productResponse.scan_id);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8000/api/v1/model-info");
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE_URL}/api/v1/model-info`);
     expect(secondBody.target_market).toBeUndefined();
     expect(secondBody.product.units_bought_recent).toBeUndefined();
   });

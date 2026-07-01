@@ -93,7 +93,7 @@ def _client():
         return anthropic.Anthropic(
             api_key=settings.anthropic_api_key,
             timeout=settings.ai_feedback_timeout_seconds,
-            max_retries=1,
+            max_retries=0,
         )
     except Exception as exc:  # pragma: no cover - construction failure only
         logger.warning("anthropic_client_failed", extra={"error_type": type(exc).__name__})
