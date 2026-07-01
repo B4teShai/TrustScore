@@ -173,7 +173,7 @@ def should_use_price_currency(
     expected_currency: str,
     url: str,
 ) -> bool:
-    """Reject unsupported currencies; market references still require same-currency listings."""
+    """Reject unsupported listed currencies; market references may convert supported currencies."""
     normalized = normalize_currency_code(currency)
     if normalized is None:
         return True

@@ -3,7 +3,7 @@
 import ipaddress
 from urllib.parse import urlparse, urlunparse
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.core.config import settings
 from app.db.repository import save_feedback, save_scan
@@ -96,8 +96,15 @@ def scan_extracted_product(payload: ExtractedProductScanRequest) -> ProductAnaly
 
 
 @router.post("/v1/feedback", response_model=FeedbackResponse)
-def submit_feedback(payload: FeedbackRequest) -> FeedbackResponse:
+def submit_feedback(
+    payload: FeedbackRequest,
+    background_tasks: BackgroundTasks,
+) -> FeedbackResponse:
     """Store feedback when persistence is configured; otherwise accept local mode."""
+    if settings.database_url:
+        background_tasks.add_task(save_feedback, payload)
+        return FeedbackResponse(status="accepted")
+
     result = save_feedback(payload)
     if result.status == "missing":
         raise HTTPException(
@@ -150,6 +157,10 @@ def model_info() -> dict[str, object]:
             "active": bool(settings.market_reference_enabled and settings.serper_api_key),
             "cache_ttl_seconds": settings.market_reference_cache_ttl_seconds,
             "min_results": settings.market_reference_min_results,
+            "fx_conversion": {
+                "provider": "frankfurter",
+                "active": settings.exchange_rate_enabled,
+            },
         },
         "scan_persistence": "database" if settings.database_url else (
             "local_jsonl" if settings.persist_local_scans else "disabled"

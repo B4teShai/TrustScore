@@ -147,3 +147,73 @@ def test_serper_provider_converts_usd_market_reference_to_jpy_product_currency()
     assert reference.exchange_rate == 156
     assert reference.exchange_rate_source == "Frankfurter"
     assert reference.exchange_rate_date == "2026-06-30"
+
+
+def test_serper_provider_converts_usd_market_reference_to_eur_product_currency() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.frankfurter.dev":
+            assert request.url.path == "/v2/rate/USD/EUR"
+            return httpx.Response(
+                200,
+                json={"amount": 1, "base": "USD", "quote": "EUR", "date": "2026-07-01", "rate": 0.88},
+            )
+
+        body = json.loads(request.content)
+        assert body["gl"] == "fr"
+        assert body["hl"] == "fr"
+        return httpx.Response(
+            200,
+            json={
+                "shopping": [
+                    {
+                        "title": "StarTech DisplayPort 1.4 Cable VESA Certified 1m",
+                        "link": "https://shop.example.com/a",
+                        "price": "$21.99",
+                    },
+                    {
+                        "title": "StarTech DisplayPort Cable 1m DP14VMM1M",
+                        "link": "https://shop.example.com/b",
+                        "price": "USD 24.99",
+                    },
+                    {
+                        "title": "StarTech.com DisplayPort 1.4 Cable 8K 60Hz",
+                        "link": "https://shop.example.com/c",
+                        "price": "$29.99",
+                    },
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    exchange = FrankfurterExchangeRateProvider(
+        api_url="https://api.frankfurter.dev/v2",
+        cache_ttl_seconds=0,
+        http_client=client,
+    )
+    provider = SerperMarketReferenceProvider(
+        api_key="test-key",
+        api_url="https://google.serper.dev/shopping",
+        cache_ttl_seconds=0,
+        http_client=client,
+        min_results=3,
+        exchange_rate_provider=exchange,
+    )
+    product = ProductPageData(
+        url="https://www.amazon.fr/dp/B09FP39Q81",
+        site="www.amazon.fr",
+        product_title="StarTech DisplayPort 1.4 Cable VESA Certified 1m",
+        price=23.34,
+        currency="EUR",
+        reviews=[],
+    )
+
+    reference = provider.lookup(product, target_market="EU", locale="fr-FR")
+
+    assert reference is not None
+    assert reference.currency == "EUR"
+    assert reference.comparable_count == 3
+    assert reference.median_price == 21.99
+    assert reference.original_currency == "USD"
+    assert reference.exchange_rate == 0.88
+    assert reference.exchange_rate_source == "Frankfurter"
+    assert reference.exchange_rate_date == "2026-07-01"

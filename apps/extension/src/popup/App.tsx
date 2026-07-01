@@ -11,6 +11,7 @@ import type {
   ComponentEvidence,
   ComponentScores,
   ExtractedProductPayload,
+  FeedbackPayload,
   ProductAnalysisResponse,
   TargetMarket,
 } from "../shared/types";
@@ -62,6 +63,7 @@ type CurrentPage = {
 
 const LAST_RESULT_KEY = "trustscore:lastResult";
 const BROWSER_ID_KEY = "trustscore:browserId";
+const PENDING_FEEDBACK_KEY = "trustscore:pendingFeedback";
 const REVIEW_UI_COPY_RE =
   /(brief content visible,\s*double tap to read full content\.?|full content visible,\s*double tap to read brief content\.?|read more\s+read less|the media could not be loaded\.?)/gi;
 
@@ -351,6 +353,11 @@ export async function getStoredResultForPage(
 
 export async function storeLastResult(result: ProductAnalysisResponse): Promise<void> {
   await storageSet(LAST_RESULT_KEY, result);
+}
+
+async function storePendingFeedback(payload: FeedbackPayload): Promise<void> {
+  const pending = (await storageGet<FeedbackPayload[]>(PENDING_FEEDBACK_KEY)) ?? [];
+  await storageSet(PENDING_FEEDBACK_KEY, [...pending.slice(-49), payload]);
 }
 
 export async function getOrCreateBrowserId(): Promise<string | undefined> {
@@ -2213,6 +2220,13 @@ function EvidenceSection({ evidence }: { evidence: ComponentEvidence[] }) {
   );
 }
 
+function isFeedbackRetryable(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.status >= 500;
+  }
+  return error instanceof TypeError;
+}
+
 function FeedbackBlock({ scanId }: { scanId: string }) {
   const [vote, setVote] = useState<"yes" | "no" | null>(null);
   const [comment, setComment] = useState("");
@@ -2233,19 +2247,26 @@ function FeedbackBlock({ scanId }: { scanId: string }) {
 
     setError(null);
     setIsSubmitting(true);
+    const browserId = await getOrCreateBrowserId();
+    const payload: FeedbackPayload = {
+      scan_id: scanId,
+      browser_id: browserId,
+      helpful: nextVote === "yes",
+      issue_category: chip?.issue || (nextVote === "no" ? "other" : undefined),
+      corrected_component: chip?.component,
+      comment: note || undefined,
+    };
     try {
-      const browserId = await getOrCreateBrowserId();
-      const response = await submitFeedback({
-        scan_id: scanId,
-        browser_id: browserId,
-        helpful: nextVote === "yes",
-        issue_category: chip?.issue || (nextVote === "no" ? "other" : undefined),
-        corrected_component: chip?.component,
-        comment: note || undefined,
-      });
+      const response = await submitFeedback(payload);
       setFeedbackStatus(response.status);
       setSubmitted(true);
     } catch (requestError) {
+      if (isFeedbackRetryable(requestError)) {
+        await storePendingFeedback(payload);
+        setFeedbackStatus("accepted");
+        setSubmitted(true);
+        return;
+      }
       setError(
         requestError instanceof Error
           ? requestError.message
@@ -2265,7 +2286,7 @@ function FeedbackBlock({ scanId }: { scanId: string }) {
             <b>Thanks.</b>{" "}
             {feedbackStatus === "saved"
               ? "Your feedback was saved for evaluation."
-              : "Your feedback was accepted for this local demo."}
+              : "Your feedback was accepted for review."}
           </div>
         </div>
       </div>

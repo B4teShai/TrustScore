@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -405,7 +407,7 @@ def test_scan_extracted_keeps_same_market_jpy_price_without_market_reference() -
         "No verified market reference found.",
     ]
     assert evidence["price_safety"]["missing_inputs"] == [
-        "verified same-currency market reference"
+        "verified market reference or FX conversion"
     ]
     assert "product price" not in body["missing_inputs"]
 
@@ -442,7 +444,7 @@ def test_scan_extracted_keeps_supported_jpy_price_on_amazon_us() -> None:
         "No verified market reference found.",
     ]
     assert evidence["price_safety"]["missing_inputs"] == [
-        "verified same-currency market reference"
+        "verified market reference or FX conversion"
     ]
     assert body["model_modes"]["price_safety"] == "not_scored_missing_market_reference"
 
@@ -642,6 +644,10 @@ def test_model_info_returns_runtime_configuration() -> None:
     assert "trustscore_weights" in body
     assert body["feedback_scoring"] == "not_applied"
     assert body["market_reference"]["provider"] == "serper"
+    assert body["market_reference"]["fx_conversion"] == {
+        "provider": "frankfurter",
+        "active": True,
+    }
     assert "api_key" not in body["market_reference"]
     assert body["fake_review_artifact_status"] in {"loaded", "missing_or_unavailable"}
     assert set(body["risk_model_artifact_status"]) == {"seller", "price", "policy"}
@@ -691,3 +697,25 @@ def test_feedback_returns_not_found_for_unknown_scan(monkeypatch) -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "scan_not_found"
+
+
+def test_feedback_endpoint_accepts_database_mode_as_background_task(monkeypatch) -> None:
+    client = TestClient(app)
+
+    class Result:
+        status = "missing"
+
+    monkeypatch.setattr(
+        product_routes,
+        "settings",
+        replace(product_routes.settings, database_url="postgresql://example"),
+    )
+    monkeypatch.setattr(product_routes, "save_feedback", lambda _payload: Result())
+
+    response = client.post(
+        "/api/v1/feedback",
+        json={"scan_id": "11111111-1111-4111-8111-111111111111", "helpful": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "accepted"}

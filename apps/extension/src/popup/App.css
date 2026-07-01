@@ -324,6 +324,10 @@ select {
   color: var(--ink-2);
 }
 
+.refresh-page {
+  margin-top: 8px;
+}
+
 .btn-secondary:hover {
   background: #e6e9ef;
 }

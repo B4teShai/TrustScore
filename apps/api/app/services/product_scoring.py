@@ -440,7 +440,7 @@ def _component_evidence(
     elif payload.price is not None and not ignored_currency:
         failure = _market_reference_failure_label(extraction_signals)
         price_evidence.append(failure or "No verified market reference found.")
-        price_missing.append("verified same-currency market reference")
+        price_missing.append("verified market reference or FX conversion")
 
     policy_evidence = []
     policy_missing = []
@@ -502,7 +502,8 @@ def _component_evidence(
         ComponentEvidence(
             component="price_safety",
             summary=(
-                "Price safety is scored only with a verified same-currency market reference."
+                "Price safety is scored with verified market references in the listed currency "
+                "or converted through a supported FX rate."
             ),
             evidence=price_evidence[:5],
             missing_inputs=price_missing,

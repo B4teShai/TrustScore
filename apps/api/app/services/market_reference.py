@@ -236,7 +236,7 @@ class SerperMarketReferenceProvider:
         locale: str | None = None,
         allow_without_listed_price: bool = False,
     ) -> MarketReference | None:
-        """Return a same-currency market reference, or None when not verified."""
+        """Return a market reference in the listed currency, converting supported currencies when needed."""
         if (
             not self.active
             or product.average_market_price is not None
@@ -391,7 +391,7 @@ def enrich_market_reference(
     locale: str | None = None,
     allow_without_listed_price: bool = False,
 ) -> tuple[ProductPageData, list[str]]:
-    """Add a Serper median market price when a verified reference is available."""
+    """Add a Serper median market price, using FX conversion when verified references need it."""
     if not market_reference_provider.active:
         return product, ["market_reference:unavailable:provider_inactive"]
     if product.average_market_price is not None:
