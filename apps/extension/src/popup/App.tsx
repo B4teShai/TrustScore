@@ -65,6 +65,37 @@ const BROWSER_ID_KEY = "trustscore:browserId";
 const REVIEW_UI_COPY_RE =
   /(brief content visible,\s*double tap to read full content\.?|full content visible,\s*double tap to read brief content\.?|read more\s+read less|the media could not be loaded\.?)/gi;
 
+function TrustLogo({ size = 28 }: { size?: number }) {
+  const id = `trust-logo-${size}`;
+  return (
+    <svg
+      aria-hidden="true"
+      className="logo-mark"
+      height={size}
+      viewBox="0 0 64 64"
+      width={size}
+    >
+      <defs>
+        <linearGradient id={id} x1="10" x2="54" y1="8" y2="58">
+          <stop offset="0" stopColor="#ff4fa3" />
+          <stop offset="0.55" stopColor="#f43f5e" />
+          <stop offset="1" stopColor="#fb7185" />
+        </linearGradient>
+      </defs>
+      <rect fill={`url(#${id})`} height="56" rx="16" width="56" x="4" y="4" />
+      <circle cx="32" cy="32" fill="none" r="15" stroke="white" strokeWidth="5" />
+      <path
+        d="M32 13v8M32 43v8M13 32h8M43 32h8"
+        stroke="white"
+        strokeLinecap="round"
+        strokeWidth="5"
+      />
+      <path d="M22 42 42 22" stroke="#ffe4f1" strokeLinecap="round" strokeWidth="5" />
+      <circle cx="32" cy="32" fill="white" r="4" />
+    </svg>
+  );
+}
+
 const Icon = ({
   children,
   size = 16,
@@ -909,6 +940,26 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
       return {};
     }
     const currency = detectCurrency(value);
+    const prefixMatch = value.match(
+      /(US\s*\$|C\$|A\$|\$|USD|MNT|₮|€|EUR|£|GBP|¥|￥|円|JPY)\s*([0-9][0-9.,]*[0-9]|[0-9])/i,
+    );
+    if (prefixMatch) {
+      const parsedCurrency = detectCurrency(prefixMatch[1]) || currency;
+      return {
+        currency: parsedCurrency,
+        price: parseAmount(prefixMatch[2], parsedCurrency),
+      };
+    }
+    const suffixMatch = value.match(
+      /([0-9][0-9.,]*[0-9]|[0-9])\s*(USD|MNT|EUR|GBP|JPY|円|CAD|AUD)/i,
+    );
+    if (suffixMatch) {
+      const parsedCurrency = detectCurrency(suffixMatch[2]) || currency;
+      return {
+        currency: parsedCurrency,
+        price: parseAmount(suffixMatch[1], parsedCurrency),
+      };
+    }
     const numMatch = value.match(/[0-9][0-9.,]*[0-9]|[0-9]/);
     if (!numMatch) {
       return {};
@@ -1163,6 +1214,9 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
         ]) || attr("meta[property='product:price:amount']", "content")
       );
     }
+    if (isAmazon()) {
+      return amazonPriceTextFromDom();
+    }
     return (
       text("#corePrice_feature_div .a-price .a-offscreen") ||
       text("#corePrice_feature_div .a-price") ||
@@ -1176,10 +1230,62 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
     );
   }
 
+  function amazonPriceTextFromDom(): string | undefined {
+    return (
+      firstText([
+        "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
+        "#apex_desktop .a-price .a-offscreen",
+        "#corePrice_feature_div .a-price .a-offscreen",
+        "#desktop_buybox .a-price .a-offscreen",
+        "#buybox .a-price .a-offscreen",
+        "#newBuyBoxPrice",
+        "#priceblock_ourprice",
+        "#priceblock_dealprice",
+        "#price_inside_buybox",
+      ]) ||
+      splitAmazonPriceText() ||
+      amazonOfferPriceText() ||
+      attr("meta[property='product:price:amount']", "content")
+    );
+  }
+
+  function amazonOfferPriceText(): string | undefined {
+    for (const selector of [
+      "#desktop_buybox",
+      "#buybox",
+      "#centerCol",
+      "#twister",
+      "#variation_color_name",
+      "[data-feature-name='twister']",
+    ]) {
+      const value = text(selector);
+      const price = pricePhraseFromText(value);
+      if (price) {
+        return price;
+      }
+    }
+    return undefined;
+  }
+
+  function pricePhraseFromText(value: string | undefined): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    const currencyAmount = String.raw`(?:US\s*\$|C\$|A\$|\$|USD|MNT|₮|€|EUR|£|GBP|¥|￥|円|JPY)\s*[0-9][0-9.,]*`;
+    const fromMatch = value.match(
+      new RegExp(String.raw`(?:options?|offers?)\s+from\s*(${currencyAmount})`, "i"),
+    );
+    if (fromMatch) {
+      return fromMatch[1];
+    }
+    const directMatch = value.match(new RegExp(`(${currencyAmount})`, "i"));
+    return directMatch?.[1];
+  }
+
   function splitAmazonPriceText(): string | undefined {
     const containers = Array.from(
       document.querySelectorAll(
-        "#corePriceDisplay_desktop_feature_div, #apex_desktop, #corePrice_feature_div, .a-price",
+        "#corePriceDisplay_desktop_feature_div, #apex_desktop, #corePrice_feature_div, #desktop_buybox, #buybox",
       ),
     );
     for (const container of containers) {
@@ -1436,7 +1542,15 @@ function ProductThumbnail({ imageUrl, title }: { imageUrl?: string; title: strin
   );
 }
 
-function ScoreRing({ score, risk }: { score: number; risk: RiskKey }) {
+function ScoreRing({
+  score,
+  risk,
+  size = "normal",
+}: {
+  score: number;
+  risk: RiskKey;
+  size?: "normal" | "compact";
+}) {
   const radius = 76;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference * (1 - score / 100);
@@ -1444,10 +1558,10 @@ function ScoreRing({ score, risk }: { score: number; risk: RiskKey }) {
   return (
     <div
       aria-label={`TrustScore ${score} out of 100, ${riskLabel(risk)}`}
-      className={`score-ring risk-${risk}`}
+      className={`score-ring score-ring-${size} risk-${risk}`}
       role="img"
     >
-      <svg width="168" height="168">
+      <svg width="168" height="168" viewBox="0 0 168 168">
         <circle cx="84" cy="84" r={radius} className="ring-bg" />
         <circle
           cx="84"
@@ -1530,12 +1644,15 @@ function signalCoverage(result: ProductAnalysisResponse): CoverageItem[] {
   const price = evidence.get("price_safety");
   const policy = evidence.get("return_policy_clarity");
   const priceEvidence = price?.evidence ?? [];
-  const marketEvidence = priceEvidence.find((item) =>
-    item.toLowerCase().includes("market reference found"),
-  );
   const listedPriceRead = priceEvidence.some((item) => item.toLowerCase().includes("listed price"));
   const priceScored = !result.model_modes.price_safety?.startsWith("not_scored");
   const policyScored = !result.model_modes.return_policy_clarity?.startsWith("not_scored");
+  const marketReference = priceEvidence.find((item) =>
+    item.toLowerCase().startsWith("market reference found"),
+  );
+  const marketReferenceFailure = priceEvidence.find((item) =>
+    item.toLowerCase().startsWith("no verified market reference"),
+  );
 
   return [
     {
@@ -1573,10 +1690,10 @@ function signalCoverage(result: ProductAnalysisResponse): CoverageItem[] {
       status: policyScored ? (policy?.evidence.length ? "read" : "missing") : "not-scored",
     },
     {
-      detail: marketEvidence ?? "No verified market reference found",
+      detail: marketReference ?? marketReferenceFailure ?? "No verified market reference found",
       icon: I.Search,
       label: "Market",
-      status: marketEvidence ? "read" : "not-scored",
+      status: marketReference ? "read" : "not-scored",
     },
   ];
 }
@@ -1660,10 +1777,10 @@ function MarketContextSection({ result }: { result: ProductAnalysisResponse }) {
 
 function Header({ state }: { state: ViewState }) {
   return (
-    <div className="popup-head">
-      <div className="logo">
-        <img alt="" src="/icons/icon-32.png" />
-      </div>
+      <div className="popup-head">
+        <div className="logo">
+          <TrustLogo size={28} />
+        </div>
       <div>
         <div className="brand-name">AI TrustScore</div>
         <div className="brand-sub">
@@ -1765,7 +1882,7 @@ function LoadingState({ progress }: { progress: number }) {
         <div className="ring-bg" />
         <div className="ring-fg" />
         <div className="core">
-          <I.Brain size={26} sw={1.6} />
+          <TrustLogo size={38} />
         </div>
       </div>
 
@@ -1817,6 +1934,30 @@ function DetectingState() {
   );
 }
 
+function SummaryReasons({ reasons, risk }: { reasons: string[]; risk: RiskKey }) {
+  const visibleReasons = reasons.slice(0, 2);
+  if (!visibleReasons.length) {
+    return null;
+  }
+
+  return (
+    <div className="summary-reasons" aria-label="Main score reasons">
+      <div className="summary-reasons-title">Main reasons</div>
+      {visibleReasons.map((reason, index) => {
+        const tone = reasonTone(index, risk);
+        const ReasonIcon =
+          tone === "tick" ? I.CheckCircle : tone === "bad" ? I.AlertOctagon : I.AlertTriangle;
+        return (
+          <div className={`summary-reason is-${tone}`} key={reason}>
+            <ReasonIcon size={13} />
+            <span>{reason}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ResultState({
   onAnalyze,
   onFeedback,
@@ -1836,6 +1977,7 @@ function ResultState({
   const sourceLabel = result.fetch_mode === "extension_dom" ? "Active-tab scan" : "Page scan";
   const isLowConfidence = result.confidence < 0.55;
   const reliability = scanReliability(result);
+  const confidencePct = Math.round(result.confidence * 100);
 
   function isScored(name: keyof ComponentScores): boolean {
     return name !== "user_feedback_history" && !result.model_modes[name]?.startsWith("not_scored");
@@ -1869,20 +2011,20 @@ function ResultState({
       </div>
 
       {reliability.isWeak ? (
-        <div className="confidence-banner" role="status">
-          <I.AlertTriangle size={14} />
-          <span>{reliability.message}</span>
-        </div>
-      ) : null}
-
-      {reliability.isWeak ? (
-        <div className="score-limited" aria-label={`${reliability.evidenceLabel}. TrustScore ${result.trust_score}.`}>
-          <div className="limited-eyebrow">{reliability.evidenceLabel}</div>
-          <h3>Evidence check needed</h3>
-          <p>
-            TrustScore {result.trust_score} · {riskLabel(risk)} · Confidence{" "}
-            {Math.round(result.confidence * 100)}%
-          </p>
+        <div className="score-summary is-limited">
+          <ScoreRing risk={risk} score={result.trust_score} size="compact" />
+          <div className="score-summary-copy">
+            <div className="score-badge">
+              <I.AlertTriangle size={12} />
+              {reliability.evidenceLabel}
+            </div>
+            <h3>Score needs evidence check</h3>
+            <p>{reliability.message}</p>
+            <div className="score-summary-meta">
+              <span>{riskLabel(risk)}</span>
+              <span>Confidence {confidencePct}%</span>
+            </div>
+          </div>
         </div>
       ) : (
         <div className="score-wrap">
@@ -1892,7 +2034,7 @@ function ResultState({
             {riskLabel(risk)}
           </div>
           <div className="confidence-line">
-            Confidence {Math.round(result.confidence * 100)}% · {reliability.evidenceLabel}
+            Confidence {confidencePct}% · {reliability.evidenceLabel}
           </div>
         </div>
       )}
@@ -1918,73 +2060,84 @@ function ResultState({
         </div>
       ) : null}
 
-      <SignalCoverageSection result={result} />
-      <MarketContextSection result={result} />
+      <SummaryReasons reasons={result.top_reasons} risk={risk} />
 
-      <div className="sec-h">
-        <h3>Top reasons</h3>
-      </div>
-      <div className="card reasons-card">
-        {result.top_reasons.map((reason, index) => {
-          const tone = reasonTone(index, risk);
-          const ReasonIcon =
-            tone === "tick"
-              ? I.CheckCircle
-              : tone === "bad"
-                ? I.AlertOctagon
-                : I.AlertTriangle;
-          return (
-            <div className="reason" key={reason}>
-              <div className={tone}>
-                <ReasonIcon size={14} />
-              </div>
-              <div>{reason}</div>
-            </div>
-          );
-        })}
-      </div>
-
-      <EvidenceSection evidence={result.evidence} />
-
-      <details className="model-breakdown" open={!isLowConfidence}>
-        <summary className="sec-h">
-          <h3>Model breakdown</h3>
+      <details className="scan-details">
+        <summary className="details-summary">
+          <span className="details-label">
+            <I.Search size={13} />
+            <span className="show-details-label">Show full scan details</span>
+            <span className="hide-details-label">Hide full scan details</span>
+          </span>
           <span className="mono muted">
             {components.filter(([name]) => isGrounded(name)).length} of {components.length} with data
           </span>
         </summary>
-        <div className="metrics-list">
-          {[...components]
-            .sort((a, b) => Number(isGrounded(b[0])) - Number(isGrounded(a[0])))
-            .map(([name, score]) => {
-          const config = COMPONENT_CONFIG[name];
-          const MetricIcon = config.icon;
-          const grounded = isGrounded(name);
-          const tone = grounded ? componentTone(score) : "med";
-          const subtitle =
-            name === "user_feedback_history"
-              ? "Not applied to score"
-              : grounded
-                ? metricSubtitle(name, score)
-                : result.model_modes[name]?.startsWith("not_scored")
-                  ? "Not scored for this page"
-                  : "No visible data on this page";
-          return (
-            <div className={`metric is-${tone} ${grounded ? "" : "is-nodata"}`} key={name}>
-              <div className="ic">
-                <MetricIcon size={14} />
-              </div>
-              <div className="metric-main">
-                <div className="lbl">{config.label}</div>
-                <div className="sub">{subtitle}</div>
-                <div className={`bar is-${tone}`}>
-                  <span style={{ width: `${grounded ? score : 0}%` }} />
+        <div className="details-body">
+          <SignalCoverageSection result={result} />
+          <MarketContextSection result={result} />
+
+          <div className="sec-h">
+            <h3>All reasons</h3>
+          </div>
+          <div className="card reasons-card">
+            {result.top_reasons.map((reason, index) => {
+              const tone = reasonTone(index, risk);
+              const ReasonIcon =
+                tone === "tick"
+                  ? I.CheckCircle
+                  : tone === "bad"
+                    ? I.AlertOctagon
+                    : I.AlertTriangle;
+              return (
+                <div className="reason" key={reason}>
+                  <div className={tone}>
+                    <ReasonIcon size={14} />
+                  </div>
+                  <div>{reason}</div>
                 </div>
-              </div>
-              <div className="val">{grounded ? score : "—"}</div>
-            </div>
-          );
+              );
             })}
+          </div>
+
+          <EvidenceSection evidence={result.evidence} />
+
+          <div className="sec-h">
+            <h3>Model breakdown</h3>
+          </div>
+          <div className="metrics-list">
+            {[...components]
+              .sort((a, b) => Number(isGrounded(b[0])) - Number(isGrounded(a[0])))
+              .map(([name, score]) => {
+            const config = COMPONENT_CONFIG[name];
+            const MetricIcon = config.icon;
+            const grounded = isGrounded(name);
+            const tone = grounded ? componentTone(score) : "med";
+            const subtitle =
+              name === "user_feedback_history"
+                ? "Not applied to score"
+                : grounded
+                  ? metricSubtitle(name, score)
+                  : result.model_modes[name]?.startsWith("not_scored")
+                    ? "Not scored for this page"
+                    : "No visible data on this page";
+            return (
+              <div className={`metric is-${tone} ${grounded ? "" : "is-nodata"}`} key={name}>
+                <div className="ic">
+                  <MetricIcon size={14} />
+                </div>
+                <div className="metric-main">
+                  <div className="lbl">{config.label}</div>
+                  <div className="sub">{subtitle}</div>
+                  <div className={`bar is-${tone}`}>
+                    <span style={{ width: `${grounded ? score : 0}%` }} />
+                  </div>
+                </div>
+                <div className="val">{grounded ? score : "—"}</div>
+              </div>
+            );
+              })}
+          </div>
         </div>
       </details>
 

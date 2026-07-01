@@ -28,6 +28,12 @@ PRICE_SUFFIX_RE = re.compile(
     r"([0-9][0-9,.]*)\s?(USD|MNT|EUR|GBP|JPY|円|CAD|AUD)",
     re.I,
 )
+PRICE_AMOUNT_TOKEN = r"(?:US\s*\$|C\$|A\$|\$|USD|MNT|₮|€|EUR|£|GBP|¥|￥|円|JPY)\s*[0-9][0-9,.]*"
+AMAZON_FROM_PRICE_RE = re.compile(
+    rf"(?:options?|offers?)\s+from\s*({PRICE_AMOUNT_TOKEN})",
+    re.I,
+)
+AMAZON_DIRECT_PRICE_RE = re.compile(rf"({PRICE_AMOUNT_TOKEN})", re.I)
 RATING_RE = re.compile(r"([0-5](?:\.[0-9])?)\s*(?:out of 5|stars?)", re.I)
 REVIEW_COUNT_RE = re.compile(r"([0-9][0-9,]*)\s+(?:ratings?|reviews?)", re.I)
 POLICY_RE = re.compile(
@@ -203,13 +209,15 @@ AMAZON_PROFILE = MarketplaceProfile(
         "meta[property='og:image']",
     ),
     price_selectors=(
+        "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
+        "#apex_desktop .a-price .a-offscreen",
         "#corePrice_feature_div .a-price .a-offscreen",
-        "#corePrice_feature_div .a-price",
+        "#desktop_buybox .a-price .a-offscreen",
+        "#buybox .a-price .a-offscreen",
+        "#newBuyBoxPrice",
         "#priceblock_ourprice",
         "#priceblock_dealprice",
         "#price_inside_buybox",
-        ".a-price .a-offscreen",
-        ".a-price",
         "meta[property='product:price:amount']",
     ),
     seller_selectors=(
@@ -646,6 +654,12 @@ def _extract_price_and_currency(
     page_currency = normalize_currency_code(
         _element_text(soup.select_one("meta[property='product:price:currency']"))
     )
+    if profile.site_signal == "site_amazon":
+        for value in _amazon_price_texts(soup):
+            price, parsed_currency = _parse_price_text(value, allow_without_currency=False)
+            if price is not None:
+                candidates.append((price, parsed_currency or page_currency))
+
     for selector in (*profile.price_selectors, *GENERIC_PROFILE.price_selectors):
         value = _element_text(soup.select_one(selector))
         price, parsed_currency = _parse_price_text(value, allow_without_currency=True)
@@ -667,7 +681,7 @@ def _extract_price_and_currency(
 def _split_price_texts(soup: BeautifulSoup) -> list[str]:
     values: list[str] = []
     containers = soup.select(
-        "#corePriceDisplay_desktop_feature_div, #apex_desktop, #corePrice_feature_div, .a-price"
+        "#corePriceDisplay_desktop_feature_div, #apex_desktop, #corePrice_feature_div, #desktop_buybox, #buybox"
     )
     for container in containers:
         symbol = _element_text(container.select_one(".a-price-symbol"))
@@ -685,6 +699,32 @@ def _split_price_texts(soup: BeautifulSoup) -> list[str]:
         else:
             values.append(compact_whole)
     return values
+
+
+def _amazon_price_texts(soup: BeautifulSoup) -> list[str]:
+    values: list[str] = []
+    for selector in (
+        "#desktop_buybox",
+        "#buybox",
+        "#centerCol",
+        "#twister",
+        "#variation_color_name",
+        "[data-feature-name='twister']",
+    ):
+        value = _price_phrase_from_text(_element_text(soup.select_one(selector)))
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def _price_phrase_from_text(value: str | None) -> str | None:
+    if not value:
+        return None
+    match = AMAZON_FROM_PRICE_RE.search(value)
+    if match:
+        return match.group(1)
+    match = AMAZON_DIRECT_PRICE_RE.search(value)
+    return match.group(1) if match else None
 
 
 def _extract_rating(

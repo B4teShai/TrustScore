@@ -430,6 +430,34 @@ def test_extract_product_page_reads_split_amazon_jp_price() -> None:
     assert result.product.currency == "JPY"
 
 
+def test_extract_product_page_prefers_amazon_jp_buying_option_over_sponsored_price() -> None:
+    html = """
+    <html>
+      <body>
+        <h1>Yamazen EDC-H601(B) Dehumidifier</h1>
+        <div class="sponsored-carousel">
+          <span class="a-price">¥8,628</span>
+        </div>
+        <div id="centerCol">
+          <p>No featured offers available</p>
+          <p>gray (dark gray) 3 options from ¥15,800</p>
+          <p>white 2 options from ¥15,800</p>
+          <p>gray (light gray) 3 options from ¥15,100</p>
+        </div>
+        <div id="bylineInfo">Visit the 山善(YAMAZEN) Store</div>
+        <button>Add to cart</button>
+      </body>
+    </html>
+    """
+
+    result = extract_product_page(html, "https://www.amazon.co.jp/dp/B0TESTJP14")
+
+    assert result.detected is True
+    assert result.product is not None
+    assert result.product.price == 15800
+    assert result.product.currency == "JPY"
+
+
 def test_extract_product_page_accepts_japanese_return_policy() -> None:
     html = """
     <html>
