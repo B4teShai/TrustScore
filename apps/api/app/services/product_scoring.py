@@ -441,6 +441,8 @@ def _component_evidence(
             f"Market reference found{count_label}: {_money(payload.average_market_price, payload.currency)}"
             f" ({source})"
         )
+        if "market_reference:serper:query=category" in extraction_signals:
+            price_evidence.append("Comparables matched by category keywords.")
         if (
             payload.market_reference_original_currency
             and payload.market_reference_exchange_rate is not None

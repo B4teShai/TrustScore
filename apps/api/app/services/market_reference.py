@@ -36,8 +36,15 @@ _PRICE_SUFFIX_RE = re.compile(
     r"([0-9][0-9,]*(?:\.[0-9]+)?)\s*(USD|EUR|GBP|JPY|円)",
     re.I,
 )
-_TOKEN_RE = re.compile(r"[a-z0-9]+", re.I)
+_TOKEN_RE = re.compile(r"[a-z0-9]+|[぀-ヿ㐀-䶿一-鿿]+", re.I)
+_CJK_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
 _SERPER_COUNT_SIGNAL_RE = re.compile(r"^market_reference:serper:count=(\d+)$")
+_SIZE_ATTR_RE = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:x\s*\d+(?:\.\d+)?)?\s*(?:inch(?:es)?|in|cm|mm|ft|oz|ml|l)\b",
+    re.I,
+)
+_PACK_ATTR_RE = re.compile(r"\b\d+\s*(?:panels?|packs?|pcs|pieces?|count|pairs?|sets?)\b", re.I)
+_MAX_REQUIRED_OVERLAP = 4
 _STOPWORDS = {
     "a",
     "and",
@@ -67,6 +74,7 @@ class MarketReference:
     currency: str
     comparable_count: int
     source: str = "Serper"
+    query_strategy: str = "title"
     original_currency: str | None = None
     exchange_rate: float | None = None
     exchange_rate_source: str | None = None
@@ -252,21 +260,32 @@ class SerperMarketReferenceProvider:
             return None
         market = market_country_from_url(product.url) or market_from_url(product.url) or resolved_market
 
-        query = _query_for_product(product.product_title)
-        if not query:
+        primary = _primary_query(product.product_title)
+        if not primary:
             return None
+        fallback = _category_query(product.product_title, product.category_path)
+        queries = [("title", primary)]
+        if fallback and fallback.lower() != primary.lower():
+            queries.append(("category", fallback))
 
-        cache_key = f"{market}:{currency}:{query.lower()}"
+        cache_key = f"{market}:{currency}:{primary.lower()}|{(fallback or '').lower()}"
         cached = self._get_cache(cache_key)
         if cached is not _MISS:
             return cached
 
-        reference = self._lookup_uncached(
-            query=query,
-            product=product,
-            currency=currency,
-            market=market,
-        )
+        category_tokens = frozenset(_tokens(" ".join(product.category_path or [])))
+        reference = None
+        for strategy, query in queries:
+            reference = self._lookup_uncached(
+                query=query,
+                product=product,
+                currency=currency,
+                market=market,
+                extra_tokens=category_tokens,
+                query_strategy=strategy,
+            )
+            if reference is not None:
+                break
         self._set_cache(cache_key, reference)
         return reference
 
@@ -277,6 +296,8 @@ class SerperMarketReferenceProvider:
         product: ProductPageData,
         currency: str,
         market: str,
+        extra_tokens: frozenset[str] = frozenset(),
+        query_strategy: str = "title",
     ) -> MarketReference | None:
         headers = {
             "Content-Type": "application/json",
@@ -311,8 +332,16 @@ class SerperMarketReferenceProvider:
             data,
             product_title=product.product_title,
             product_url=product.url,
+            extra_tokens=extra_tokens,
+            # A category query already constrains the topic through the search
+            # itself. A lexical title gate would keep only listings that share
+            # the product's script/language (e.g. English titles on amazon.co.jp),
+            # which is a biased premium subsample — trust the query instead.
+            require_title_similarity=query_strategy == "title",
         )[: self.max_results]
-        converted = self._convert_listing_prices(listings, target_currency=currency)
+        converted = _drop_price_outliers(
+            self._convert_listing_prices(listings, target_currency=currency)
+        )
         if len(converted) < self.min_results:
             return None
 
@@ -333,6 +362,7 @@ class SerperMarketReferenceProvider:
             currency=currency,
             comparable_count=len(converted),
             source="Serper",
+            query_strategy=query_strategy,
             original_currency=original_currency,
             exchange_rate=exchange_rate.rate if exchange_rate else None,
             exchange_rate_source=exchange_rate.source if exchange_rate else None,
@@ -412,6 +442,9 @@ def enrich_market_reference(
     )
     if reference is None:
         return product, ["market_reference:unavailable:no_verified_comparables"]
+    signals = [f"market_reference:serper:count={reference.comparable_count}"]
+    if reference.query_strategy != "title":
+        signals.append(f"market_reference:serper:query={reference.query_strategy}")
     enriched = product.model_copy(
         update={
             "average_market_price": reference.median_price,
@@ -424,7 +457,7 @@ def enrich_market_reference(
             "market_reference_exchange_rate_date": reference.exchange_rate_date,
         }
     )
-    return enriched, [f"market_reference:serper:count={reference.comparable_count}"]
+    return enriched, signals
 
 
 def market_reference_count_from_signals(signals: list[str]) -> int | None:
@@ -440,6 +473,8 @@ def _listing_prices_from_serper(
     *,
     product_title: str,
     product_url: str,
+    extra_tokens: frozenset[str] = frozenset(),
+    require_title_similarity: bool = True,
 ) -> list[_ListingPrice]:
     if not isinstance(data, dict):
         return []
@@ -455,7 +490,13 @@ def _listing_prices_from_serper(
         if not isinstance(item, dict):
             continue
         title = _clean_text(item.get("title"))
-        if not title or not _similar_enough(title_tokens, title):
+        if not title:
+            continue
+        if require_title_similarity and not _similar_enough(
+            title_tokens,
+            title,
+            extra_tokens=extra_tokens,
+        ):
             continue
         link = _clean_text(item.get("link"))
         if link and _canonical_url(link) == product_url_key:
@@ -500,29 +541,93 @@ def _parse_price(value: str | None) -> _ListingPrice | None:
     return None
 
 
-def _query_for_product(title: str) -> str:
+def _primary_query(title: str) -> str:
     words = title.split()
     query = " ".join(words[:14])
     return query[:180].strip()
 
 
+def _category_query(title: str, category_path: list[str] | None) -> str | None:
+    """Brand + category-leaf terms + salient size/pack attributes; None without breadcrumbs."""
+    if not category_path:
+        return None
+    leaf_terms: list[str] = []
+    seen_terms: set[str] = set()
+    for crumb in category_path[-2:]:
+        for part in re.split(r"\s*[&,/]\s*|\s+and\s+", crumb):
+            cleaned = part.strip()
+            if cleaned and cleaned.lower() not in seen_terms:
+                seen_terms.add(cleaned.lower())
+                leaf_terms.append(cleaned)
+    if not leaf_terms:
+        return None
+    words = title.split()
+    brand = words[0] if words else ""
+    attrs = [match.group(0) for match in (_SIZE_ATTR_RE.search(title), _PACK_ATTR_RE.search(title)) if match]
+    query = " ".join(filter(None, [brand, *leaf_terms, *attrs]))[:180].strip()
+    return query or None
+
+
 def _tokens(value: str) -> set[str]:
-    return {
-        token.lower()
-        for token in _TOKEN_RE.findall(value)
-        if len(token) > 2 and token.lower() not in _STOPWORDS
-    }
+    out: set[str] = set()
+    for token in _TOKEN_RE.findall(value):
+        lowered = token.lower()
+        if _CJK_RE.search(token):
+            # CJK has no word spacing; character bigrams make overlap meaningful.
+            if len(token) == 1:
+                out.add(lowered)
+            else:
+                out.update(token[i : i + 2].lower() for i in range(len(token) - 1))
+            continue
+        if len(lowered) > 2 and lowered not in _STOPWORDS:
+            # Light plural folding so "Frames"/"frame" and "Panels"/"panel" match.
+            if len(lowered) > 3 and lowered.endswith("s"):
+                lowered = lowered[:-1]
+            out.add(lowered)
+    return out
 
 
-def _similar_enough(product_tokens: set[str], listing_title: str) -> bool:
-    if not product_tokens:
+def _similar_enough(
+    product_tokens: set[str],
+    listing_title: str,
+    extra_tokens: frozenset[str] = frozenset(),
+) -> bool:
+    matchable = product_tokens | extra_tokens
+    if not matchable:
         return False
     listing_tokens = _tokens(listing_title)
     if not listing_tokens:
         return False
-    overlap = len(product_tokens & listing_tokens)
-    required = 1 if len(product_tokens) <= 3 else max(2, math.ceil(len(product_tokens) * 0.28))
-    return overlap >= required
+    overlap = matchable & listing_tokens
+    required = (
+        1
+        if len(product_tokens) <= 3
+        else min(_MAX_REQUIRED_OVERLAP, max(2, math.ceil(len(product_tokens) * 0.28)))
+    )
+    if len(overlap) >= required:
+        return True
+    # Cross-script escape hatch: a shared model-number-like token is strong evidence.
+    return any(len(token) >= 4 and any(char.isdigit() for char in token) for token in overlap)
+
+
+def _drop_price_outliers(
+    converted: list[tuple[float, ExchangeRate | None]],
+) -> list[tuple[float, ExchangeRate | None]]:
+    """Drop listings priced wildly away from the preliminary median.
+
+    Shopping results mix pack sizes, premium variants and mispriced listings;
+    a 3x band around the median keeps genuine comparables while stopping a few
+    luxury or clearance listings from dragging the reference off target.
+    """
+    if len(converted) < 3:
+        return converted
+    preliminary = median(price for price, _ in converted)
+    if preliminary <= 0:
+        return converted
+    kept = [
+        item for item in converted if preliminary / 3 <= item[0] <= preliminary * 3
+    ]
+    return kept or converted
 
 
 def _number(value: str) -> float | None:

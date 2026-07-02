@@ -12,7 +12,7 @@ from typing import Literal
 from urllib.parse import urlparse, urlunparse
 
 from app.core.config import settings
-from app.db.session import get_engine
+from app.db.session import engine_in_cooldown, get_engine, report_engine_connection_failure
 from app.schemas.product_analysis import (
     FeedbackRequest,
     ProductAnalysisResponse,
@@ -44,7 +44,7 @@ def save_scan(
     Persistence is intentionally best-effort so local demos still return a
     TrustScore even when no database is configured or a write fails.
     """
-    engine = get_engine()
+    engine = get_engine() if not engine_in_cooldown() else None
     if engine is None:
         return _save_scan_local(
             product=product,
@@ -128,7 +128,6 @@ def save_scan(
 
             model_version_id = _upsert_model_version(connection, response)
             _insert_reviews(connection, product_id, product)
-            _insert_scan_review_samples(connection, response, product)
             connection.execute(
                 text(
                     """
@@ -177,6 +176,9 @@ def save_scan(
                     "recommendation": response.recommendation,
                 },
             )
+            # After the prediction_runs insert: these rows carry a foreign key
+            # to the run.
+            _insert_scan_review_samples(connection, response, product)
             _insert_model_predictions(connection, response)
             _insert_audit_snapshot(
                 connection,
@@ -192,12 +194,21 @@ def save_scan(
             extra={"error_type": type(exc).__name__, "error": str(exc)},
             exc_info=True,
         )
-        return False
+        if "OperationalError" in type(exc).__name__:
+            report_engine_connection_failure()
+        # Keep a durable local record even when the database write fails.
+        return _save_scan_local(
+            product=product,
+            response=response,
+            browser_id=browser_id,
+            fetch_mode=fetch_mode,
+            extraction_signals=extraction_signals,
+        )
 
 
 def save_feedback(payload: FeedbackRequest) -> FeedbackPersistenceResult:
     """Persist feedback or return accepted when no database is configured."""
-    engine = get_engine()
+    engine = get_engine() if not engine_in_cooldown() else None
     if engine is None:
         _save_feedback_local(payload)
         return FeedbackPersistenceResult(status="accepted")
@@ -254,6 +265,10 @@ def save_feedback(payload: FeedbackRequest) -> FeedbackPersistenceResult:
             extra={"error_type": type(exc).__name__, "error": str(exc)},
             exc_info=True,
         )
+        if "OperationalError" in type(exc).__name__:
+            report_engine_connection_failure()
+            _save_feedback_local(payload)
+            return FeedbackPersistenceResult(status="accepted")
         return FeedbackPersistenceResult(status="error")
 
 

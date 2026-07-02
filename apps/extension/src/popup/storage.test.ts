@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  amazonLocalePathPrefix,
   analyzeProductWithPreviewFallback,
   canonicalProductPageUrl,
   getOrCreateBrowserId,
@@ -163,6 +164,58 @@ describe("popup storage helpers", () => {
       seller: { name: "GoalGiftShop", rating: 4.9, review_count: 1284 },
       site: "www.etsy.com",
     });
+  });
+
+  it("cleans breadcrumb category paths and maps them into the payload", () => {
+    const preview = normalizeProductPreview({
+      title: "MIULEE Blackout Linen Textured Curtains",
+      categoryPath: [
+        "  Home & Kitchen  ",
+        "home & kitchen",
+        "",
+        42,
+        "Window Treatments",
+        "Curtains & Drapes",
+        "Panels",
+        "Extra One",
+        "Extra Two",
+        "Extra Three",
+        "Extra Four",
+        "Extra Five",
+      ],
+    });
+
+    expect(preview?.categoryPath).toEqual([
+      "Home & Kitchen",
+      "Window Treatments",
+      "Curtains & Drapes",
+      "Panels",
+      "Extra One",
+      "Extra Two",
+      "Extra Three",
+      "Extra Four",
+    ]);
+
+    const payload = productPayloadFromPreview({
+      host: "www.amazon.com",
+      preview: preview ?? undefined,
+      targetMarket: "US",
+      url: "https://www.amazon.com/dp/B08SBYPF14",
+    });
+
+    expect(payload?.category_path).toEqual(preview?.categoryPath);
+
+    const withoutCrumbs = normalizeProductPreview({ title: "Plain Product" });
+    expect(withoutCrumbs?.categoryPath).toBeUndefined();
+  });
+
+  it("keeps the Amazon locale path prefix for review-page fetches", () => {
+    expect(
+      amazonLocalePathPrefix("/-/en/Naotico-Upholstered-Headboard/dp/B0FC247FC1/"),
+    ).toBe("/-/en");
+    expect(amazonLocalePathPrefix("/-/en_GB/dp/B0FC247FC1/")).toBe("/-/en_GB");
+    expect(amazonLocalePathPrefix("/dp/B0FC247FC1/")).toBe("");
+    expect(amazonLocalePathPrefix("/-/enx/dp/B0FC247FC1/")).toBe("");
   });
 
   it("drops localized marketplace preview prices outside the target market", () => {

@@ -22,18 +22,35 @@ export class ApiError extends Error {
   }
 }
 
+// A scan can legitimately take several seconds (market reference + FX + AI
+// guidance), but a hung backend must not freeze the popup on a spinner forever.
+const REQUEST_TIMEOUT_MS = 30000;
+
 async function requestJson<TResponse>(
   path: string,
   options?: RequestInit,
   validate?: (value: unknown) => value is TResponse,
 ): Promise<TResponse> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-    ...options,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+      ...options,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new ApiError(
+        "The TrustScore backend took too long to respond. Please try again.",
+        504,
+        "backend_timeout",
+      );
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     throw await parseApiError(response);
@@ -141,12 +158,18 @@ function shouldRetryLegacyExtractedPayload(
   return (
     error.status === 422 &&
     error.code === "validation_error" &&
-    (payload.target_market !== undefined || payload.product.units_bought_recent !== undefined)
+    (payload.target_market !== undefined ||
+      payload.product.units_bought_recent !== undefined ||
+      payload.product.category_path !== undefined)
   );
 }
 
 function hasModernExtractedOnlyFields(payload: ExtractedProductAnalysisPayload): boolean {
-  return payload.target_market !== undefined || payload.product.units_bought_recent !== undefined;
+  return (
+    payload.target_market !== undefined ||
+    payload.product.units_bought_recent !== undefined ||
+    payload.product.category_path !== undefined
+  );
 }
 
 async function backendSupportsModernExtractedPayload(): Promise<boolean> {
@@ -176,6 +199,7 @@ export function toLegacyExtractedPayload(
   };
   delete legacyPayload.target_market;
   delete legacyPayload.product.units_bought_recent;
+  delete legacyPayload.product.category_path;
   return legacyPayload;
 }
 

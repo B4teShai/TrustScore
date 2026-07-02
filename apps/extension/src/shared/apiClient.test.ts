@@ -186,12 +186,14 @@ describe("apiClient", () => {
         product_title: "Wireless Headphones",
         reviews: [],
         units_bought_recent: 1000,
+        category_path: ["Electronics", "Headphones"],
       },
     });
 
     expect(payload.target_market).toBeUndefined();
     expect(payload.locale).toBe("en-US");
     expect(payload.product.units_bought_recent).toBeUndefined();
+    expect(payload.product.category_path).toBeUndefined();
   });
 
   it("accepts nulls for missing optional product metadata", async () => {

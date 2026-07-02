@@ -181,6 +181,77 @@ def test_scan_extracted_uses_market_reference_when_serper_finds_comparables(monk
     ]
 
 
+def test_scan_extracted_accepts_category_path_and_reports_category_match(monkeypatch) -> None:
+    client = TestClient(app)
+    seen_category_paths: list[list[str] | None] = []
+
+    def fake_market_reference(
+        product: ProductPageData,
+        **_kwargs,
+    ) -> tuple[ProductPageData, list[str]]:
+        seen_category_paths.append(product.category_path)
+        return (
+            product.model_copy(
+                update={
+                    "average_market_price": 25.0,
+                    "market_reference_count": 5,
+                    "market_reference_source": "Serper",
+                }
+            ),
+            ["market_reference:serper:count=5", "market_reference:serper:query=category"],
+        )
+
+    monkeypatch.setattr(product_routes, "enrich_market_reference", fake_market_reference)
+
+    response = client.post(
+        "/api/v1/scan-extracted",
+        json={
+            "product": {
+                "url": "https://www.amazon.com/dp/B08SBYPF14",
+                "site": "www.amazon.com",
+                "product_title": "MIULEE 100% Blackout Linen Textured Curtains 52 x 84 Inch (2 Panels)",
+                "price": 24.39,
+                "currency": "USD",
+                "category_path": [
+                    "  Home & Kitchen  ",
+                    "Home Décor Products",
+                    "home & kitchen",
+                    "",
+                    "Window Treatments",
+                    "Curtains & Drapes",
+                    "Panels",
+                    "Extra One",
+                    "Extra Two",
+                    "Extra Three",
+                    "Extra Four",
+                ],
+                "seller": {"name": "MIULEE Store"},
+                "return_policy": "Returns accepted within 30 days.",
+                "reviews": [{"text": "Great quality blackout curtains."}],
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert seen_category_paths == [
+        [
+            "Home & Kitchen",
+            "Home Décor Products",
+            "Window Treatments",
+            "Curtains & Drapes",
+            "Panels",
+            "Extra One",
+            "Extra Two",
+            "Extra Three",
+        ]
+    ]
+    assert body["model_modes"]["price_safety"] != "not_scored_missing_market_reference"
+    assert "market_reference:serper:query=category" in body["extraction_signals"]
+    evidence = {item["component"]: item for item in body["evidence"]}
+    assert "Comparables matched by category keywords." in evidence["price_safety"]["evidence"]
+
+
 def test_scan_extracted_treats_genuine_sale_as_fair_price(monkeypatch) -> None:
     client = TestClient(app)
 

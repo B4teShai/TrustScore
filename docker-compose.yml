@@ -20,8 +20,6 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Migrations run in filename order on first init (001 -> 002 -> 003).
-      - ./db/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d trustscore"]
       interval: 5s
@@ -56,6 +54,9 @@ services:
     volumes:
       # Best + version-by-version artifacts, read-only.
       - ./ml/artifacts:/app/ml/artifacts:ro
+      # The API applies these on startup (001 -> 002 -> 003), creating the
+      # schema when missing and recording progress in schema_migrations.
+      - ./db/migrations:/app/db/migrations:ro
     depends_on:
       db:
         condition: service_healthy

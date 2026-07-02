@@ -50,6 +50,7 @@ type ProductPreview = {
   unitsBoughtRecent?: number;
   description?: string;
   returnPolicy?: string;
+  categoryPath?: string[];
   reviews?: PreviewReview[];
   lang?: string;
 };
@@ -357,7 +358,10 @@ export async function getStoredResultForPage(
   pageUrl: string,
 ): Promise<ProductAnalysisResponse | null> {
   const stored = await storageGet<ProductAnalysisResponse>(LAST_RESULT_KEY);
-  if (stored?.product?.url === pageUrl) {
+  if (
+    stored?.product?.url &&
+    canonicalProductPageUrl(stored.product.url) === canonicalProductPageUrl(pageUrl)
+  ) {
     return stored;
   }
   return null;
@@ -520,6 +524,7 @@ export function normalizeProductPreview(value: unknown): ProductPreview | null {
   const sellerReviewCount = validInteger(candidate.sellerReviewCount);
   const description = cleanText(candidate.description)?.slice(0, 4000);
   const returnPolicy = cleanText(candidate.returnPolicy)?.slice(0, 4000);
+  const categoryPath = normalizeCategoryPath(candidate.categoryPath);
   const reviews = normalizeReviews(candidate.reviews);
 
   if (!title && !imageUrl && !seller) {
@@ -539,9 +544,30 @@ export function normalizeProductPreview(value: unknown): ProductPreview | null {
     unitsBoughtRecent,
     description,
     returnPolicy,
+    categoryPath,
     reviews,
     lang,
   };
+}
+
+function normalizeCategoryPath(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const crumbs: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    const cleaned = cleanText(item)?.slice(0, 100);
+    if (!cleaned || seen.has(cleaned.toLowerCase())) {
+      continue;
+    }
+    seen.add(cleaned.toLowerCase());
+    crumbs.push(cleaned);
+    if (crumbs.length >= 8) {
+      break;
+    }
+  }
+  return crumbs.length ? crumbs : undefined;
 }
 
 function normalizeReviews(value: unknown): PreviewReview[] {
@@ -641,6 +667,7 @@ export function productPayloadFromPreview(page: CurrentPage): ExtractedProductPa
     currency: priceInfo.currency,
     seller,
     return_policy: limitText(preview.returnPolicy, 4000),
+    category_path: preview.categoryPath,
     reviews: (preview.reviews ?? []).slice(0, 50),
     rating: preview.rating,
     review_count: preview.reviewCount,
@@ -1130,11 +1157,22 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
   async function fetchReviewPageDoc(asin: string, page: number): Promise<Document | null> {
     // Same-origin fetch runs in the logged-in Amazon tab context, so it returns
     // the real reviews page HTML (not a bot-defended snapshot).
+    // Keep the "/-/en" style locale prefix so localized marketplaces (e.g.
+    // amazon.co.jp in English) return the same-language reviews page.
+    // Inline copy of amazonLocalePathPrefix() — executeScript serializes this
+    // function, so it cannot reference module scope.
+    const localeMatch = window.location.pathname.match(/^\/-\/[a-zA-Z]{2}(?:[_-][a-zA-Z]{2,4})?(?=\/)/);
+    const localePrefix = localeMatch ? localeMatch[0] : "";
     const url =
-      `${window.location.origin}/product-reviews/${asin}/` +
+      `${window.location.origin}${localePrefix}/product-reviews/${asin}/` +
       `?reviewerType=all_reviews&sortBy=helpful&pageNumber=${page}`;
     try {
-      const response = await fetch(url, { credentials: "include" });
+      // Per-page timeout so one slow marketplace response cannot eat the whole
+      // review-collection deadline.
+      const response = await fetch(url, {
+        credentials: "include",
+        signal: AbortSignal.timeout(3000),
+      });
       if (!response.ok) {
         return null;
       }
@@ -1203,6 +1241,35 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
         text("#bookDescription_feature_div") ||
         attr("meta[name='description']", "content"),
     );
+  }
+
+  function categoryPathFromDom(): string[] | undefined {
+    const selectors = [
+      "#wayfinding-breadcrumbs_feature_div ul li a",
+      "#wayfinding-breadcrumbs_container ul li a",
+      "nav[aria-label*='readcrumb'] a",
+      ".a-breadcrumb a",
+      "[itemtype*='BreadcrumbList'] a",
+    ];
+    for (const selector of selectors) {
+      const items: string[] = [];
+      const seen = new Set<string>();
+      for (const node of Array.from(document.querySelectorAll(selector))) {
+        const label = node.textContent?.replace(/\s+/g, " ").trim();
+        if (!label || label.length > 100 || seen.has(label.toLowerCase())) {
+          continue;
+        }
+        seen.add(label.toLowerCase());
+        items.push(label);
+        if (items.length >= 8) {
+          break;
+        }
+      }
+      if (items.length) {
+        return items;
+      }
+    }
+    return undefined;
   }
 
   function returnPolicyFromDom(): string | undefined {
@@ -1574,9 +1641,17 @@ async function extractProductPreviewFromDocument(): Promise<ProductPreview> {
     unitsBoughtRecent: recentPurchasesFromDom(),
     description: descriptionFromDom(),
     returnPolicy: returnPolicyFromDom(),
+    categoryPath: categoryPathFromDom(),
     reviews: await collectReviews(50),
     lang,
   };
+}
+
+// Pure twin of the inline locale-prefix match in fetchReviewPageDoc (which is
+// serialized into the page by executeScript and cannot reference module scope).
+export function amazonLocalePathPrefix(pathname: string): string {
+  const match = pathname.match(/^\/-\/[a-zA-Z]{2}(?:[_-][a-zA-Z]{2,4})?(?=\/)/);
+  return match ? match[0] : "";
 }
 
 function productMetaFromResult(result: ProductAnalysisResponse): ProductMeta {
@@ -2777,6 +2852,8 @@ function isUnsupportedProductPageType(urlValue: string): boolean {
   try {
     const path = new URL(urlValue).pathname.toLowerCase();
     return (
+      path === "/s" ||
+      path.startsWith("/s/") ||
       path.includes("/review") ||
       path.includes("/reviews") ||
       path.includes("/search") ||

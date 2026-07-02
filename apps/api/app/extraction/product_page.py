@@ -116,6 +116,7 @@ class MarketplaceProfile:
     policy_selectors: tuple[str, ...] = ()
     review_card_selectors: tuple[str, ...] = ()
     review_body_selectors: tuple[str, ...] = ()
+    breadcrumb_selectors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,11 @@ GENERIC_PROFILE = MarketplaceProfile(
         "[data-review-text]",
         "p",
     ),
+    breadcrumb_selectors=(
+        "nav[aria-label*='readcrumb'] a",
+        "[itemtype*='BreadcrumbList'] a",
+        ".a-breadcrumb a",
+    ),
 )
 
 
@@ -257,6 +263,10 @@ AMAZON_PROFILE = MarketplaceProfile(
         "[data-hook='review-collapsed']",
         ".review-text-content",
         ".cr-original-review-text",
+    ),
+    breadcrumb_selectors=(
+        "#wayfinding-breadcrumbs_feature_div ul li a",
+        "#wayfinding-breadcrumbs_container ul li a",
     ),
 )
 
@@ -504,6 +514,7 @@ def extract_product_page(
         list_price=price_result.list_price,
         currency=price_result.currency,
         average_market_price=None,
+        category_path=_extract_category_path(soup, profile),
         seller=seller,
         return_policy=_extract_policy(soup, page_text, profile),
         reviews=reviews,
@@ -1329,6 +1340,23 @@ def _selector_texts(
             if len(values) >= limit:
                 return values
     return values
+
+
+def _extract_category_path(soup: BeautifulSoup, profile: MarketplaceProfile) -> list[str] | None:
+    for selector in (*profile.breadcrumb_selectors, *GENERIC_PROFILE.breadcrumb_selectors):
+        crumbs: list[str] = []
+        seen: set[str] = set()
+        for element in soup.select(selector):
+            value = _element_text(element)
+            if not value or len(value) > 100 or value.lower() in seen:
+                continue
+            seen.add(value.lower())
+            crumbs.append(value)
+            if len(crumbs) >= 8:
+                break
+        if crumbs:
+            return crumbs
+    return None
 
 
 def _select_review_cards(soup: BeautifulSoup, profile: MarketplaceProfile) -> list[Any]:

@@ -296,6 +296,7 @@ def _sanitize_extracted_product(
         list_price=list_price,
         currency=currency,
         average_market_price=average_market_price,
+        category_path=_sanitize_category_path(product.category_path),
         seller=seller,
         return_policy=_truncate(clean_policy_snippet(product.return_policy), 1000),
         reviews=_sanitize_reviews(product.reviews),
@@ -304,6 +305,24 @@ def _sanitize_extracted_product(
         units_bought_recent=product.units_bought_recent,
         feedback_score=_feedback_score_or_none(product.feedback_score),
     ), extra_signals
+
+
+def _sanitize_category_path(values: list[str] | None) -> list[str] | None:
+    if not values:
+        return None
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        cleaned = _truncate(" ".join(value.split()), 60)
+        if not cleaned or cleaned.lower() in seen:
+            continue
+        seen.add(cleaned.lower())
+        out.append(cleaned)
+        if len(out) >= 8:
+            break
+    return out or None
 
 
 def _feedback_score_or_none(value: int | None) -> int | None:
@@ -428,9 +447,9 @@ def _page_type_from_url(url: str) -> str:
         return "account"
     if "/review" in path or "/reviews" in path:
         return "review_page"
-    if "/search" in path:
+    if "/search" in path or path == "/s" or path.startswith("/s/"):
         return "search"
-    if any(token in path for token in ("/category", "/browse")):
+    if any(token in path for token in ("/category", "/browse")) or path == "/b" or path.startswith("/b/"):
         return "category"
     if any(token in path for token in ("/dp/", "/gp/product/", "/product", "/products/", "/item/", "/itm/")):
         return "product"

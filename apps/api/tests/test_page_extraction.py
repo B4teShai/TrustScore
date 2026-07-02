@@ -869,3 +869,57 @@ def test_extract_product_page_ignores_list_price_when_not_a_discount() -> None:
     assert result.product is not None
     assert result.product.price == 49.99
     assert result.product.list_price is None
+
+
+def test_extract_product_page_reads_amazon_breadcrumbs() -> None:
+    html = """
+    <html>
+      <body>
+        <div id="wayfinding-breadcrumbs_feature_div">
+          <ul>
+            <li><a href="/b?node=1">Home &amp; Kitchen</a></li>
+            <li><a href="/b?node=2">Window Treatments</a></li>
+            <li><a href="/b?node=3">Curtains &amp; Drapes</a></li>
+            <li><a href="/b?node=4">Panels</a></li>
+          </ul>
+        </div>
+        <h1>MIULEE Blackout Linen Textured Curtains</h1>
+        <span>$24.39</span>
+        <button>Add to cart</button>
+      </body>
+    </html>
+    """
+
+    result = extract_product_page(html, "https://www.amazon.com/dp/B08SBYPF14")
+
+    assert result.detected is True
+    assert result.product is not None
+    assert result.product.category_path == [
+        "Home & Kitchen",
+        "Window Treatments",
+        "Curtains & Drapes",
+        "Panels",
+    ]
+
+
+def test_extract_product_page_reads_generic_breadcrumbs() -> None:
+    html = """
+    <html>
+      <body>
+        <nav aria-label="Breadcrumb">
+          <a href="/home">Home</a>
+          <a href="/decor">Decor</a>
+          <a href="/curtains">Curtains</a>
+        </nav>
+        <h1>Linen Textured Curtains</h1>
+        <span itemprop="price">$21.99</span>
+        <button>Add to cart</button>
+      </body>
+    </html>
+    """
+
+    result = extract_product_page(html, "https://shop.example.com/products/linen-curtains")
+
+    assert result.detected is True
+    assert result.product is not None
+    assert result.product.category_path == ["Home", "Decor", "Curtains"]

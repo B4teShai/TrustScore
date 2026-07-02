@@ -159,6 +159,12 @@ class ProductPageData(StrictBaseModel):
         max_length=32,
         examples=["2026-06-30"],
     )
+    category_path: list[str] | None = Field(
+        default=None,
+        max_length=8,
+        description="Breadcrumb category trail from the product page, root first.",
+        examples=[["Home & Kitchen", "Curtains & Drapes", "Panels"]],
+    )
     seller: SellerInfo | None = None
     return_policy: str | None = Field(
         default=None,
@@ -224,6 +230,7 @@ class ExtractedProductData(LenientBaseModel):
     list_price: float | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, max_length=64)
     average_market_price: float | None = Field(default=None, gt=0)
+    category_path: list[str] | None = Field(default=None, max_length=12)
     seller: ExtractedSellerInfo | None = None
     return_policy: str | None = Field(default=None, max_length=4000)
     reviews: list[ExtractedReviewInput] = Field(default_factory=list, max_length=50)

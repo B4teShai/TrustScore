@@ -40,6 +40,7 @@ export type ExtractedProductPayload = {
   list_price?: number;
   currency?: string;
   average_market_price?: number;
+  category_path?: string[];
   seller?: SellerInfo;
   return_policy?: string;
   reviews: ReviewInput[];

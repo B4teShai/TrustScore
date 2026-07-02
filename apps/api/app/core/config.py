@@ -5,24 +5,27 @@ import os
 from pathlib import Path
 
 
-# Load apps/api/.env (where the user pastes ANTHROPIC_API_KEY) before any
-# os.getenv read below. Real environment variables still win over the file.
+# Load .env files before any os.getenv read below. apps/api/.env wins over the
+# repo-root .env (the one docker compose uses), and real environment variables
+# win over both.
 def _load_env_file() -> None:
-    env_path = Path(__file__).resolve().parents[2] / ".env"
-    if not env_path.is_file():
-        return
-    try:
-        from dotenv import load_dotenv
+    api_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[4]
+    for env_path in (api_root / ".env", repo_root / ".env"):
+        if not env_path.is_file():
+            continue
+        try:
+            from dotenv import load_dotenv
 
-        load_dotenv(env_path, override=False)
-    except Exception:
-        # python-dotenv missing: fall back to a tiny KEY=VALUE parser.
-        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+            load_dotenv(env_path, override=False)
+        except Exception:
+            # python-dotenv missing: fall back to a tiny KEY=VALUE parser.
+            for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 _load_env_file()
@@ -95,6 +98,12 @@ class Settings:
         "http://localhost:5173,chrome-extension://YOUR_EXTENSION_ID",
     )
     database_url: str | None = os.getenv("DATABASE_URL")
+    # Apply db/migrations/*.sql at startup (creates tables when missing).
+    auto_migrate: bool = _get_bool("AUTO_MIGRATE", True)
+    migrations_dir: str = os.getenv(
+        "MIGRATIONS_DIR",
+        str(_REPO_ROOT / "db" / "migrations"),
+    )
     supabase_url: str | None = os.getenv("SUPABASE_URL")
     browser_id_hash_salt: str = os.getenv(
         "BROWSER_ID_HASH_SALT",

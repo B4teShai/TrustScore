@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY apps/api/app ./app
 COPY ml/artifacts/best /app/ml/artifacts/best
+# Startup auto-migrations: the API creates/upgrades its schema on boot.
+COPY db/migrations /app/db/migrations
 
 EXPOSE 8080
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

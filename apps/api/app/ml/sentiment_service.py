@@ -131,10 +131,10 @@ class SentimentService:
                 )
                 confidences.append(max(float(value) for value in row))
         else:
-            predictions = pipeline.predict(review_texts)
+            predictions = list(pipeline.predict(review_texts))
             label_scores = {"negative": 20, "neutral": 55, "positive": 90}
             scores.extend(label_scores.get(str(label), 50) for label in predictions)
-            confidences.extend([0.55] * len(scores))
+            confidences.extend([0.55] * len(predictions))
 
         return SentimentResult(
             score=_clamp_score(sum(scores) / len(scores)),
